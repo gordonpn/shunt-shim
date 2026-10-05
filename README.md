@@ -1,5 +1,7 @@
 # shunt-shim
 
+Status: design proposal, not yet implemented. See [the proposed MVP and deployment options](docs/MVP.md) for the initial scope, acceptance criteria, and language/platform trade-offs. The capabilities and setup instructions below describe the broader planned design.
+
 `shunt-shim` is a lightweight, edge-hosted OpenAI-compatible routing shim and quota-aware reverse proxy for always-free large language model (LLM) tiers. It multiplexes free developer allocations from Google AI Studio, Groq, OpenRouter, and Cloudflare Workers AI behind a unified `/v1/chat/completions` API endpoint.
 
 Client tooling such as Aider, OpenCode, Continue, Raycast, and official OpenAI SDKs connect using standard `OPENAI_BASE_URL` and `OPENAI_API_KEY` configurations, while `shunt-shim` manages semantic aliases, context window routing, rate-limit waterfalls, and edge-coordinated quota tracking.
@@ -169,6 +171,7 @@ curl -s -X POST "https://shunt-shim.<your-subdomain>.workers.dev/v1/chat/complet
 
 ## Documentation Roadmap
 
+- [docs/MVP.md](docs/MVP.md): Proposed MVP scope, acceptance criteria, language choices, and deployment alternatives.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Edge topology, multi-project synchronization, request lifecycle, context heuristics, and protocol translation.
 - [docs/FREE_TIERS.md](docs/FREE_TIERS.md): Comprehensive inventory of always-free compute, storage, database, and LLM tiers.
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md): Configuration variables, Wrangler settings, virtual aliases, tenant tokens, and KV schemas.
