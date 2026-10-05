@@ -2,44 +2,27 @@
 
 Status: design proposal, not yet implemented. See [the proposed MVP and deployment options](docs/MVP.md) for the initial scope, acceptance criteria, and language/platform trade-offs. The capabilities and setup instructions below describe the broader planned design.
 
-`shunt-shim` is a lightweight, edge-hosted OpenAI-compatible routing shim and quota-aware reverse proxy for always-free large language model (LLM) tiers. It multiplexes free developer allocations from Google AI Studio, Groq, OpenRouter, and Cloudflare Workers AI behind a unified `/v1/chat/completions` API endpoint.
+`shunt-shim` is a proposed OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP would expose one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. No gateway capabilities are implemented yet; language and deployment platform remain undecided.
 
-Client tooling such as Aider, OpenCode, Continue, Raycast, and official OpenAI SDKs connect using standard `OPENAI_BASE_URL` and `OPENAI_API_KEY` configurations, while `shunt-shim` manages semantic aliases, context window routing, rate-limit waterfalls, and edge-coordinated quota tracking.
+The goal is to let existing coding clients use one endpoint without manually switching providers when the primary is rate-limited. Compatibility must be verified with a real client's streaming and tool-call workflows.
 
 ```
-+-------------------------------------------------------------+
-|    Client Tooling (Aider, OpenCode, Continue, Raycast)      |
-+------------------------------+------------------------------+
-                               | Standard OpenAI JSON-RPC / SSE
-                               v
-+-------------------------------------------------------------+
-|              Cloudflare Worker Gateway (Edge)               |
-|                                                             |
-|  * /v1/models (Virtual alias catalog)                       |
-|  * /v1/chat/completions (Request adapter and SSE streaming) |
-|  * Bearer token authentication and project tenant tags      |
-|  * Centralized quota tracking and sliding windows via KV    |
-|  * Payload-aware context size routing                       |
-|  * Deterministic fallback waterfalls                        |
-+---------------+-----------------------------+---------------+
-                |                             |
-     Native REST (Gemini format)              | OpenAI REST / SSE
-                v                             v
-+-------------------------------+ +---------------------------+
-|       Google AI Studio        | |    Groq / OpenRouter      |
-| (Gemini 2.5/3.8 Flash, 1M ctx)| | (Llama 3.3 70B, DeepSeek) |
-+-------------------------------+ +---------------------------+
+Client -> Proposed gateway -> Groq
+                          -> Google AI Studio (fallback)
 ```
 
-## Key Capabilities
+## Proposed MVP Capabilities
 
-- Drop-in OpenAI Compatibility: Exposes `/v1/chat/completions` and `/v1/models` supporting both non-streaming JSON and Server-Sent Events (SSE) streaming chunks.
-- Semantic Model Aliasing: Route via functional aliases (`fast`, `deep`, `reasoning`) rather than fragile provider model identifiers.
-- Global Quota Synchronization: Coordinates sliding rate limits (Groq RPM/TPM) and calendar-day limits (Google AI Studio 1,000 RPD) across all your machines via Cloudflare KV.
-- Context-Aware Routing: Inspects payload size to direct short queries to ultra-low-latency LPU inference (Groq) and large repository dumps (>100k tokens) to 1M-token context models (Google Gemini Flash).
-- Deterministic Fallback Waterfalls: Automatically diverts traffic upon encountering HTTP 429 status codes or nearing daily limits without failing downstream client requests.
-- Multi-Tenant Virtual Tokens: Issues virtual project tokens (such as `sk-proj-aider` and `sk-proj-server`) with priority tiers so background batch jobs never starve interactive developer workflows.
-- Zero Host Maintenance: Deploys as a Cloudflare Worker running in V8 isolates with zero idle memory usage, sub-millisecond cold starts, and zero operating system maintenance.
+- OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints.
+- One `fast` alias routing to explicitly allowed free-tier models on Groq and Google AI Studio.
+- Non-streaming JSON, incremental SSE, tool calls, and tool-result messages.
+- One bounded fallback attempt on upstream HTTP 429, HTTP 503, or a connection timeout, only before committing the downstream response.
+- One randomly generated bearer token, request validation, body limits, deadlines, and cancellation.
+- Diagnostics that exclude prompts, completions, and credentials.
+
+If all eligible providers are exhausted, the gateway must return an explicit error. It cannot guarantee uninterrupted access or additional quota.
+
+Shared accounting, proactive quota checks, tenant priorities, context routing, `deep` and `reasoning` aliases, OpenRouter, and Workers AI are deferred. Cloudflare KV is eventually consistent and lacks atomic counter updates, so it cannot reliably enforce global quotas under concurrency. If strict coordination becomes necessary on Workers, evaluate Durable Objects instead.
 
 ## Free-Tier Provider Summary
 
@@ -52,13 +35,15 @@ Client tooling such as Aider, OpenCode, Continue, Raycast, and official OpenAI S
 
 For a comprehensive catalog of always-free compute, storage, edge networks, and LLMs, consult [docs/FREE_TIERS.md](docs/FREE_TIERS.md).
 
-## Quickstart
+## Planned Cloudflare Quickstart
+
+These examples are not runnable yet: the Worker entrypoint and Wrangler configuration do not exist. Use them only after implementation and if Cloudflare is the selected deployment platform. The MVP requires no KV namespace.
 
 ### 1. Prerequisites
 - `bun` or `node`
 - `just` task runner
 - Cloudflare account with Workers enabled
-- Free API keys from [Google AI Studio](https://aistudio.google.com), [Groq](https://console.groq.com), and optionally [OpenRouter](https://openrouter.ai)
+- Free API keys from [Google AI Studio](https://aistudio.google.com) and [Groq](https://console.groq.com)
 
 ### 2. Local Setup
 Clone the repository and set up local development variables:
@@ -70,7 +55,6 @@ Edit `.dev.vars` to include your provider keys:
 ```ini
 GEMINI_API_KEY="AIzaSy..."
 GROQ_API_KEY="gsk_..."
-OPENROUTER_API_KEY="sk-or-v1-..."
 GATEWAY_TOKENS="sk-proj-aider,sk-proj-server,sk-proj-local"
 ```
 
@@ -81,15 +65,11 @@ just dev
 The gateway will start listening on `http://127.0.0.1:8787`.
 
 ### 3. Deploy to Cloudflare Workers
-Provision KV storage and deploy to the edge:
+Store secrets and deploy to the edge:
 ```bash
-# Provision Cloudflare KV namespace
-bunx wrangler kv namespace create SHIMS_KV
-
 # Store upstream credentials securely as edge secrets
 bunx wrangler secret put GEMINI_API_KEY
 bunx wrangler secret put GROQ_API_KEY
-bunx wrangler secret put OPENROUTER_API_KEY
 bunx wrangler secret put GATEWAY_TOKENS
 
 # Deploy to Cloudflare edge
@@ -98,7 +78,7 @@ just deploy
 
 For detailed deployment procedures, refer to [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
-## Client Integration
+## Planned Client Integration
 
 Configure client tools by pointing their base URL and API key to `shunt-shim`:
 
@@ -124,13 +104,6 @@ In your `config.json`:
       "title": "Edge Fast (Groq 70B)",
       "provider": "openai",
       "model": "fast",
-      "apiBase": "https://shunt-shim.<your-subdomain>.workers.dev/v1",
-      "apiKey": "sk-proj-aider"
-    },
-    {
-      "title": "Edge Deep Context (Gemini Flash 1M)",
-      "provider": "openai",
-      "model": "deep",
       "apiBase": "https://shunt-shim.<your-subdomain>.workers.dev/v1",
       "apiKey": "sk-proj-aider"
     }
@@ -174,5 +147,5 @@ curl -s -X POST "https://shunt-shim.<your-subdomain>.workers.dev/v1/chat/complet
 - [docs/MVP.md](docs/MVP.md): Proposed MVP scope, acceptance criteria, language choices, and deployment alternatives.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Edge topology, multi-project synchronization, request lifecycle, context heuristics, and protocol translation.
 - [docs/FREE_TIERS.md](docs/FREE_TIERS.md): Comprehensive inventory of always-free compute, storage, database, and LLM tiers.
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): Configuration variables, Wrangler settings, virtual aliases, tenant tokens, and KV schemas.
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): Proposed configuration variables, Wrangler settings, virtual aliases, tenant tokens, and deferred accounting.
 - [docs/RUNBOOK.md](docs/RUNBOOK.md): Setup instructions, deployment steps, smoke tests, observability, and incident diagnostics.

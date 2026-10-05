@@ -2,6 +2,8 @@
 
 This runbook documents setup, deployment, verification, monitoring, and incident response procedures for `shunt-shim`.
 
+Status: proposed Cloudflare workflow, not currently runnable. The Worker entrypoint and Wrangler configuration do not exist. The [MVP](MVP.md) defers shared accounting and requires no KV namespace; deployment platform selection remains open.
+
 ## 1. Prerequisites and Local Environment
 
 Ensure the following tools are installed:
@@ -42,15 +44,7 @@ Ensure active developer accounts and API keys from upstream providers:
 bunx wrangler login
 ```
 
-### Step 2: Provision Cloudflare KV Namespace
-Create the production KV namespace for quota counters and circuit breaker state:
-```bash
-bunx wrangler kv namespace create SHIMS_KV
-bunx wrangler kv namespace create SHIMS_KV --preview
-```
-Copy the returned `id` and `preview_id` into `wrangler.jsonc` under `kv_namespaces`.
-
-### Step 3: Provision Edge Secrets
+### Step 2: Provision Edge Secrets
 Store credentials securely in Cloudflare:
 ```bash
 bunx wrangler secret put GEMINI_API_KEY
@@ -59,7 +53,7 @@ bunx wrangler secret put OPENROUTER_API_KEY
 bunx wrangler secret put GATEWAY_TOKENS
 ```
 
-### Step 4: Deploy Worker
+### Step 3: Deploy Worker
 ```bash
 just deploy
 ```
@@ -79,9 +73,7 @@ Expected response:
 {
   "object": "list",
   "data": [
-    {"id": "fast", "object": "model", "owned_by": "shunt-shim"},
-    {"id": "deep", "object": "model", "owned_by": "shunt-shim"},
-    {"id": "reasoning", "object": "model", "owned_by": "shunt-shim"}
+    {"id": "fast", "object": "model", "owned_by": "shunt-shim"}
   ]
 }
 ```
@@ -129,27 +121,18 @@ Tail edge execution logs live:
 just tail
 ```
 
-### Inspecting KV Usage Counters
-Check current day request volume for Google AI Studio:
-```bash
-TODAY=$(date -u +"%Y-%m-%d")
-bunx wrangler kv key get --binding SHIMS_KV "usage:daily:gemini:${TODAY}"
-```
-
-Check circuit breaker health status:
-```bash
-bunx wrangler kv key get --binding SHIMS_KV "breaker:groq"
-```
+### Quota Diagnostics
+The MVP has no shared quota counters or circuit-breaker state to inspect. Use upstream status codes, rate-limit headers when available, and provider dashboards as the source of truth. See [deferred accounting](ARCHITECTURE.md#deferred-accounting) before introducing quota storage; KV counters cannot reliably enforce global quotas under concurrency.
 
 ## 6. Incident Handling and Diagnostics
 
 ### Upstream HTTP 429 (Rate Limit Tripped)
 - Symptom: Real-time logs indicate upstream 429 from Groq or Google AI Studio.
-- Action: The router automatically shifts traffic to the next provider in the alias waterfall ladder. Verify that fallback succeeded without surfacing an HTTP error to the client. If all waterfall providers are exhausted, check per-minute sliding rates.
+- Action: Verify that the one eligible fallback was attempted before response commitment. If both providers are rate-limited, expect an explicit HTTP 429 error. Inspect provider limits and retry guidance rather than local KV counters.
 
-### Daily Google AI Studio Exhaustion (1,000 RPD)
-- Symptom: Daily quota counter reaches 980 requests before 00:00 UTC.
-- Action: The circuit breaker marks Gemini as `EXHAUSTED` in KV. All `deep` traffic shifts automatically to OpenRouter :free until 00:00 UTC when the daily counter resets.
+### Google AI Studio Quota Exhaustion
+- Symptom: The provider reports quota exhaustion, for example through HTTP 429.
+- Action: Check the configured account and model's limits in the provider dashboard. The MVP has no proactive daily counter or predicted reset schedule. If the Gemini fallback is exhausted too, surface the quota error rather than claiming guaranteed failover.
 
 ### Upstream Schema or Protocol Drift
 - Symptom: Streaming chunks fail to parse or return empty responses.
