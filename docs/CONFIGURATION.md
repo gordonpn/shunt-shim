@@ -2,6 +2,23 @@
 
 This document describes proposed configuration schemas, environment variables, edge secrets, and virtual aliases for `shunt-shim`. No gateway configuration is implemented yet. The broader alias and priority proposals below are deferred beyond the [MVP](MVP.md); no KV binding or quota-accounting configuration is required for the MVP.
 
+## MVP configuration constraints
+
+The [client settings and canonical contract](COMPATIBILITY.md) take precedence over
+the broader examples below. Configure one random gateway secret, one fast alias,
+Groq primary and Gemini fallback with fixed endpoints and account-verified models.
+The existing GATEWAY_TOKENS example must contain only that one secret for the MVP;
+its plural name does not imply tenant support. Reject direct provider model names.
+Accept either Bearer or x-api-key against the same secret and reject conflicting
+headers. Provider keys are independent and never sent to clients.
+
+Select and document body limits, core parameter bounds, approved extension mappings,
+connect/total deadlines, and the shared context/output limits. The total deadline
+covers both attempts, fits client timeouts, and remains below ingress timeouts.
+No paid substitution, second fallback, context router, or reasoning guarantee is
+enabled by the illustrative configuration. PR-Agent needs an explicit shared
+context limit and gateway-only model settings.
+
 ## 1. Edge Secrets and Environment Variables
 
 Upstream API keys and edge runtime configurations are managed via Cloudflare Worker bindings.
@@ -57,7 +74,8 @@ Client applications should query virtual aliases rather than hardcoded provider 
 | `deep` | Google AI Studio (`gemini-2.5-flash`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Google AI Studio (`gemini-2.5-flash-lite`) | Large file analysis, repository context, document summarization |
 | `reasoning` | OpenRouter (`deepseek/deepseek-r1:free`) | Google AI Studio (`gemini-2.5-pro`) | Groq (`llama-3.3-70b-versatile`) | Architectural planning, complex debugging, code generation |
 
-Direct provider model names can also be passed verbatim. When an explicit model name is passed (for example, `gemini-2.5-flash`), the router skips alias expansion and routes directly to that model.
+Direct provider model routing is a deferred proposal. The MVP accepts only fast;
+an unknown alias returns HTTP 404 without an upstream call.
 
 ## 4. Multi-Tenant Project Tokens and Priority Levels
 

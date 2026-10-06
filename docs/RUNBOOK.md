@@ -4,6 +4,13 @@ This runbook documents setup, deployment, verification, monitoring, and incident
 
 Status: proposed Cloudflare workflow, not currently runnable. The Worker entrypoint and Wrangler configuration do not exist. The [MVP](MVP.md) defers shared accounting and requires no KV namespace; deployment platform selection remains open.
 
+MVP prerequisites override the broader examples: only Groq/Gemini keys and one
+random gateway secret are required. Use [client configuration](COMPATIBILITY.md)
+for all three reviewers. Before deployment, verify the ingress allows incremental
+SSE, disables response buffering, propagates disconnect cancellation, and has a
+timeout above the gateway's total bound. Configure client timeouts to exceed that
+bound; OpenCodeReview defaults to 300 seconds, not an unlimited request lifetime.
+
 ## 1. Prerequisites and Local Environment
 
 Ensure the following tools are installed:
@@ -28,7 +35,7 @@ Ensure active developer accounts and API keys from upstream providers:
    GEMINI_API_KEY="AIzaSy..."
    GROQ_API_KEY="gsk_..."
    OPENROUTER_API_KEY="sk-or-v1-..."
-   GATEWAY_TOKENS="sk-proj-aider,sk-proj-server,sk-proj-dev"
+   GATEWAY_TOKENS="<one-random-gateway-secret>"
    ```
 
 3. Start the local worker emulator:
@@ -115,6 +122,13 @@ Verify that the server rejects the request with HTTP `401 Unauthorized`.
 
 ## 5. Observability and Monitoring
 
+Before release, record all [MVP acceptance cases](MVP.md#acceptance-criteria), both
+providers independently, and deployed DeepSeek Review/PR-Agent reviews plus an
+OpenCodeReview tool-call/result/final-answer cycle. Repeat the tool cycle with a
+controlled primary failure. Preserve sanitized versions, settings, request IDs,
+commands, incremental SSE/usage evidence, and outcomes under docs/; do not claim
+compatibility from these illustrative curl commands alone.
+
 ### Real-Time Log Streaming
 Tail edge execution logs live:
 ```bash
@@ -136,5 +150,5 @@ The MVP has no shared quota counters or circuit-breaker state to inspect. Use up
 
 ### Upstream Schema or Protocol Drift
 - Symptom: Streaming chunks fail to parse or return empty responses.
-- Diagnostics: Inspect raw upstream chunks using `just tail`.
-- Resolution: Update response normalization mappings in `src/normalizers/` to reflect any changes in upstream response shapes.
+- Diagnostics: Correlate request IDs, provider/model, status, latency, and fallback reason. Use synthetic fixtures for protocol inspection; never log raw prompts, completions, chunks, or credentials.
+- Resolution: Reproduce against a pinned client and provider fixture, correct the compatible response handling, and rerun JSON/SSE/tool/usage contracts before deployment.
