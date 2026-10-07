@@ -44,3 +44,26 @@ security-events write permission. Before enabling private-repository analysis,
 verify [CodeQL availability and permissions](https://github.com/github/codeql-action/blob/2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2/README.md#license)
 and enable code scanning. This transfer does not change repository entitlements.
 Neither coverage nor CodeQL currently validates gateway code.
+
+## Review actions
+
+DeepSeek Review and PR-Agent run when a human marks a same-repository PR ready
+for review. Both require the DEEPSEEK_API_KEY repository secret; without it their
+review steps skip. Keep draft PRs as drafts while configuring automation.
+PR-Agent also accepts created/edited comments on PRs from OWNER, MEMBER, or
+COLLABORATOR authors, excluding bots. Its issue-comment workflow becomes usable
+after merging to the default branch. Trusted commands may review fork PRs through
+the GitHub API; neither reviewer checks out or executes PR code with its secret.
+
+The workflows retain direct DeepSeek access. PR-Agent uses deepseek/deepseek-chat
+for both primary and fallback; DeepSeek Review uses its pinned action's default
+model. They do not exercise the proposed shunt-shim endpoint. Store the provider
+key as DEEPSEEK_API_KEY in repository secrets; no keys are copied from SnapTally.
+Both jobs are limited to ten minutes.
+
+The source PR-Agent action pulls a mutable github_action Docker tag even when
+its action commit is pinned. This workflow uses that same action image pinned to
+the [Docker Hub tag's image digest](https://hub.docker.com/r/pragent/pr-agent/tags?name=github_action),
+checked on 2026-10-07 UTC. Refresh the digest deliberately when upgrading.
+The [source action Dockerfile](https://github.com/The-PR-Agent/pr-agent/blob/1d01f24f455bb879c1d9c557ad7de3d72dcc7975/Dockerfile.github_action_dockerhub)
+documents that image selection.
