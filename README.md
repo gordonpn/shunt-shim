@@ -92,7 +92,7 @@ including PR-Agent's context limit and gateway-only fallback settings.
 
 ## Documentation Roadmap
 
-- [docs/AUTOMATION.md](docs/AUTOMATION.md): Imported workflow quality gates, guarded coverage/CodeQL jobs, and local verification with `mise exec -- just check-workflows`.
+- [docs/AUTOMATION.md](docs/AUTOMATION.md): All six imported GitHub Actions, file guards, review secrets, coverage/CodeQL setup, and local verification with `mise exec -- just check-workflows`.
 - [docs/MVP.md](docs/MVP.md): Proposed MVP scope, acceptance criteria, language choices, and deployment alternatives.
 - [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md): Canonical request/response contract, pinned client sources, configuration, and evidence requirements.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Edge topology, multi-project synchronization, request lifecycle, context heuristics, and protocol translation.
