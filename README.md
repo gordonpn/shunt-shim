@@ -144,7 +144,7 @@ curl -s -X POST "https://shunt-shim.<your-subdomain>.workers.dev/v1/chat/complet
 
 ## Documentation Roadmap
 
-- [docs/AUTOMATION.md](docs/AUTOMATION.md): Imported GitHub Actions, required project files, and local verification with `mise exec -- just check-workflows`.
+- [docs/AUTOMATION.md](docs/AUTOMATION.md): Imported workflow quality gates, guarded coverage reporting, and local verification with `mise exec -- just check-workflows`.
 - [docs/MVP.md](docs/MVP.md): Proposed MVP scope, acceptance criteria, language choices, and deployment alternatives.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Edge topology, multi-project synchronization, request lifecycle, context heuristics, and protocol translation.
 - [docs/FREE_TIERS.md](docs/FREE_TIERS.md): Comprehensive inventory of always-free compute, storage, database, and LLM tiers.
