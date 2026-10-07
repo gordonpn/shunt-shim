@@ -26,3 +26,12 @@ Install the declared local tools with `mise install`, then run
 `just review-workflows` for OCR coverage and rules before remote delivery.
 Application tests remain inactive and unverified until implementation exists;
 a passing workflow-lint job is not evidence that the gateway works.
+
+## Coverage
+
+Coverage runs on PRs and main pushes after both pnpm project files exist. The
+test:coverage script must write coverage/lcov.info. Codecov uses the current
+repository slug, with CODECOV_TOKEN when configured or its OIDC path otherwise.
+Codecov upload errors remain non-blocking as in SnapTally; same-repository PRs
+receive an LCOV report with an 80 percent minimum. Configure repository access
+in Codecov before expecting successful uploads.
