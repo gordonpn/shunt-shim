@@ -67,3 +67,10 @@ the [Docker Hub tag's image digest](https://hub.docker.com/r/pragent/pr-agent/ta
 checked on 2026-10-07 UTC. Refresh the digest deliberately when upgrading.
 The [source action Dockerfile](https://github.com/The-PR-Agent/pr-agent/blob/1d01f24f455bb879c1d9c557ad7de3d72dcc7975/Dockerfile.github_action_dockerhub)
 documents that image selection.
+
+DeepSeek Review enforces skeptical correctness review focusing on boundary
+conditions, runtime context, edge cases, and verifiable contract behavior.
+PR-Agent reads repository configuration in `.pr_agent.toml` to enforce skeptical
+architecture review, challenging unneeded complexity or abstractions against
+documented repository architecture and structuring findings into its review
+schema.
