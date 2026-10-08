@@ -15,7 +15,10 @@ The topology and tenant/context proposals below are deferred design alternatives
 
 The MVP presents an OpenAI Chat Completions HTTP interface to three review clients
 and dispatches through compatible Groq/Gemini endpoints. Platform selection remains
-open; the extended tenant/context pipeline later in this document is deferred.
+open; the extended tenant/context pipeline later in this document is deferred. In
+extended architectures beyond the zero-cost MVP, exhausting free allowances can
+optionally route to a funded DeepSeek API balance as an emergency safety net to prevent
+workflow interruption.
 
 ```
 +-------------------------------------------------------------+
@@ -104,7 +107,7 @@ Clients request semantic aliases instead of brittle provider-specific model stri
 - `reasoning`: Complex logic and code generation (default: OpenRouter DeepSeek R1 :free; fallback: Google Gemini Pro).
 
 ### Stage 4: Waterfall Fallback Execution
-If the primary provider returns HTTP 429 (rate limited), HTTP 503 (service unavailable), or a connection timeout before response commitment, the MVP attempts its one eligible fallback. Do not replay a request once streaming starts or conceal validation and credential errors behind fallback. If no eligible provider succeeds, return an explicit error; there is no pre-flight quota check.
+If the primary provider returns HTTP 429 (rate limited), HTTP 503 (service unavailable), or a connection timeout before response commitment, the MVP attempts its one eligible fallback. Do not replay a request once streaming starts or conceal validation and credential errors behind fallback. If no eligible provider succeeds, return an explicit error; there is no pre-flight quota check. In extended post-MVP routing, exhausting free-tier candidates can optionally trigger a final fallback to a paid DeepSeek account balance before returning an error to the client.
 
 ### Stage 5: Protocol Normalization
 Both MVP upstreams expose OpenAI-compatible endpoints. Preserve completion IDs,
@@ -124,6 +127,7 @@ Providers remain the source of truth for their account-specific limits:
 | Google AI Studio | Account- and model-specific request and token limits | Handle upstream HTTP 429; return an explicit error if no eligible provider succeeds |
 | Groq | Account- and model-specific rolling request and token limits | Attempt the Gemini fallback on upstream HTTP 429 before response commitment |
 | OpenRouter (:free) | Shared free-model capacity and account limits | Deferred beyond the MVP |
+| DeepSeek (API balance) | Prepaid token balance | Optional emergency fallback when all free-tier quotas are exhausted (deferred beyond MVP) |
 
 ### Deferred Circuit Breaking
 No shared circuit-breaker state or locally predicted reset schedule is implemented or required for the MVP. Add coordinated accounting or circuit breaking only after actual usage demonstrates a need.
