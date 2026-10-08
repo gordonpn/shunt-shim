@@ -68,12 +68,18 @@ The deployed worker URL will be displayed in the terminal output (for example, `
 
 ## 4. Verification and Smoke Testing
 
-Run the following test commands against your local server (`http://127.0.0.1:8787`) or production URL.
+Export the configured gateway secret and target base URL for smoke tests:
+```bash
+GATEWAY_SECRET="<one-random-gateway-secret>"
+GATEWAY_BASE_URL="http://127.0.0.1:8787"
+```
+
+Run the following test commands against your local server or production URL.
 
 ### Verify Virtual Models Catalog
 ```bash
-curl -s -X GET "http://127.0.0.1:8787/v1/models" \
-  -H "Authorization: Bearer sk-proj-aider" | jq .
+curl -s -X GET "${GATEWAY_BASE_URL}/v1/models" \
+  -H "Authorization: Bearer ${GATEWAY_SECRET}" | jq .
 ```
 Expected response:
 ```json
@@ -87,8 +93,8 @@ Expected response:
 
 ### Test Non-Streaming Chat Completion (`fast` alias)
 ```bash
-curl -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
-  -H "Authorization: Bearer sk-proj-aider" \
+curl -s -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
+  -H "Authorization: Bearer ${GATEWAY_SECRET}" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "fast",
@@ -100,8 +106,8 @@ curl -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
 
 ### Test Streaming Chat Completion (`stream: true`)
 ```bash
-curl -N -X POST "http://127.0.0.1:8787/v1/chat/completions" \
-  -H "Authorization: Bearer sk-proj-aider" \
+curl -N -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
+  -H "Authorization: Bearer ${GATEWAY_SECRET}" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "fast",
@@ -115,7 +121,7 @@ Verify that standard `data: {"choices":[{"delta":{"content":"..."}}]}` SSE event
 
 ### Verify Authentication Enforcement
 ```bash
-curl -i -X GET "http://127.0.0.1:8787/v1/models" \
+curl -i -X GET "${GATEWAY_BASE_URL}/v1/models" \
   -H "Authorization: Bearer invalid-token"
 ```
 Verify that the server rejects the request with HTTP `401 Unauthorized`.
