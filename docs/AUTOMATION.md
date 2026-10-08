@@ -40,8 +40,8 @@ in Codecov before expecting successful uploads.
 
 CodeQL runs on PRs, main pushes, and Mondays at 06:00 UTC after it detects source
 files with js, jsx, mjs, cjs, ts, tsx, mts, or cts extensions. Its analysis job has
-security-events write permission. Before enabling private-repository analysis,
-verify [CodeQL availability and permissions](https://github.com/github/codeql-action/blob/2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2/README.md#license)
+actions read and security-events write permissions. Before enabling
+private-repository analysis, verify [CodeQL availability and permissions](https://github.com/github/codeql-action/blob/2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2/README.md#license)
 and enable code scanning. This transfer does not change repository entitlements.
 Neither coverage nor CodeQL currently validates gateway code.
 
