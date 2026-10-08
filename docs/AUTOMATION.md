@@ -55,11 +55,12 @@ COLLABORATOR authors, excluding bots. Its issue-comment workflow becomes usable
 after merging to the default branch. Trusted commands may review fork PRs through
 the GitHub API; neither reviewer checks out or executes PR code with its secret.
 
-The workflows retain direct DeepSeek access. PR-Agent uses deepseek/deepseek-flash
-for primary and deepseek/deepseek-v4-pro for fallback; DeepSeek Review uses its
-pinned action's default model. They do not exercise the proposed shunt-shim
-endpoint. Store the provider key as DEEPSEEK_API_KEY in repository secrets; no
-keys are copied from SnapTally. Both jobs are limited to ten minutes.
+The workflows retain direct DeepSeek access. PR-Agent uses
+deepseek/deepseek-v4-flash for primary and deepseek/deepseek-v4-pro for fallback;
+DeepSeek Review uses its pinned action's default model. They do not exercise the
+proposed shunt-shim endpoint. Store the provider key as DEEPSEEK_API_KEY in
+repository secrets; no keys are copied from SnapTally. Both jobs are limited to
+ten minutes.
 
 The source PR-Agent action pulls a mutable github_action Docker tag even when
 its action commit is pinned. This workflow uses that same action image pinned to
