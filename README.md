@@ -4,7 +4,7 @@ Status: design proposal, not yet implemented. See [the proposed MVP and deployme
 
 `shunt-shim` is a proposed OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP would expose one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. No gateway capabilities are implemented yet; language and deployment platform remain undecided.
 
-The goal is to let existing coding clients use one endpoint without manually switching providers when the primary is rate-limited. Compatibility must be verified with a real client's streaming and tool-call workflows.
+The goal is to let DeepSeek Review, OpenCodeReview, and PR-Agent use one endpoint without client code changes. Compatibility requires deployed evidence for all three, including OpenCodeReview's tool-call round trip. See the [pinned client sources and contract](docs/COMPATIBILITY.md).
 
 ```
 Client -> Proposed gateway -> Groq
@@ -13,11 +13,11 @@ Client -> Proposed gateway -> Groq
 
 ## Proposed MVP Capabilities
 
-- OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints.
+- OpenAI-compatible `/v1/chat/completions`, its `/chat/completions` alias, and `/v1/models`.
 - One `fast` alias routing to explicitly allowed free-tier models on Groq and Google AI Studio.
 - Non-streaming JSON, incremental SSE, tool calls, and tool-result messages.
 - One bounded fallback attempt on upstream HTTP 429, HTTP 503, or a connection timeout, only before committing the downstream response.
-- One randomly generated bearer token, request validation, body limits, deadlines, and cancellation.
+- One random gateway secret via Bearer or `x-api-key`, core validation, permissive extensions, body limits, deadlines, and cancellation.
 - Diagnostics that exclude prompts, completions, and credentials.
 
 If all eligible providers are exhausted, the gateway must return an explicit error. It cannot guarantee uninterrupted access or additional quota.
@@ -55,7 +55,7 @@ Edit `.dev.vars` to include your provider keys:
 ```ini
 GEMINI_API_KEY="AIzaSy..."
 GROQ_API_KEY="gsk_..."
-GATEWAY_TOKENS="sk-proj-aider,sk-proj-server,sk-proj-local"
+GATEWAY_TOKENS="<one-random-gateway-secret>"
 ```
 
 Start the local development server:
@@ -80,71 +80,20 @@ For detailed deployment procedures, refer to [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ## Planned Client Integration
 
-Configure client tools by pointing their base URL and API key to `shunt-shim`:
+| Review client | Gateway setting | Model |
+| :--- | :--- | :--- |
+| `hustcer/deepseek-review@v1` | `base-url=https://proxy.example.com/v1` | `fast` |
+| `alibaba/open-code-review` | `llm_protocol=openai`, `llm_url=https://proxy.example.com/v1/chat/completions` | `fast` |
+| `The-PR-Agent/pr-agent` | `openai.api_base=https://proxy.example.com/v1` | `openai/fast` |
 
-### Environment Variables
-```bash
-export OPENAI_BASE_URL="https://shunt-shim.<your-subdomain>.workers.dev/v1"
-export OPENAI_API_KEY="sk-proj-aider"
-```
-
-### Aider
-```bash
-aider --openai-api-base "https://shunt-shim.<your-subdomain>.workers.dev/v1" \
-      --openai-api-key "sk-proj-aider" \
-      --model "openai/fast"
-```
-
-### OpenCode / Continue
-In your `config.json`:
-```json
-{
-  "models": [
-    {
-      "title": "Edge Fast (Groq 70B)",
-      "provider": "openai",
-      "model": "fast",
-      "apiBase": "https://shunt-shim.<your-subdomain>.workers.dev/v1",
-      "apiKey": "sk-proj-aider"
-    }
-  ]
-}
-```
-
-### Python SDK
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="https://shunt-shim.<your-subdomain>.workers.dev/v1",
-    api_key="sk-proj-aider",
-)
-
-response = client.chat.completions.create(
-    model="fast",
-    messages=[
-        {"role": "user", "content": "Explain raft consensus in three sentences."}
-    ],
-)
-print(response.choices[0].message.content)
-```
-
-### cURL Verification
-```bash
-curl -s -X POST "https://shunt-shim.<your-subdomain>.workers.dev/v1/chat/completions" \
-  -H "Authorization: Bearer sk-proj-aider" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "fast",
-    "messages": [
-      {"role": "user", "content": "ping"}
-    ]
-  }' | jq .
-```
+Use the gateway credential, not a provider key. Follow the
+[complete configuration and evidence requirements](docs/COMPATIBILITY.md),
+including PR-Agent's context limit and gateway-only fallback settings.
 
 ## Documentation Roadmap
 
 - [docs/MVP.md](docs/MVP.md): Proposed MVP scope, acceptance criteria, language choices, and deployment alternatives.
+- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md): Canonical request/response contract, pinned client sources, configuration, and evidence requirements.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Edge topology, multi-project synchronization, request lifecycle, context heuristics, and protocol translation.
 - [docs/FREE_TIERS.md](docs/FREE_TIERS.md): Comprehensive inventory of always-free compute, storage, database, and LLM tiers.
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md): Proposed configuration variables, Wrangler settings, virtual aliases, tenant tokens, and deferred accounting.

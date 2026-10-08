@@ -3,6 +3,16 @@
 default:
     @just --list
 
+# Check documentation diff formatting
+check-docs:
+    git diff --check
+    git diff --cached --check
+
+# Resolve deterministic OCR coverage and review rules
+review-docs:
+    ocr delegate preview --format json
+    ocr delegate rule --format json Justfile README.md docs/MVP.md docs/COMPATIBILITY.md docs/ARCHITECTURE.md docs/CONFIGURATION.md docs/RUNBOOK.md
+
 # Start local edge development server using wrangler
 dev:
     bunx wrangler dev
