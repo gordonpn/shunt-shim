@@ -27,8 +27,8 @@ Upstream API keys and edge runtime configurations are managed via Cloudflare Wor
 | :--- | :--- | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | Secret | API key for Google AI Studio | Yes | `AIzaSy...` |
 | `GROQ_API_KEY` | Secret | API key for Groq Cloud | Yes | `gsk_...` |
-| `OPENROUTER_API_KEY` | Secret | API key for OpenRouter | Optional | `sk-or-v1-...` |
-| `GATEWAY_TOKENS` | Secret | Comma-separated list of valid client bearer tokens | Yes | `sk-proj-aider,sk-proj-server` |
+| `OPENROUTER_API_KEY` | Secret | API key for OpenRouter (deferred beyond MVP) | Optional | `sk-or-v1-...` |
+| `GATEWAY_TOKENS` | Secret | Gateway authentication secret (single secret for MVP) | Yes | `<one-random-gateway-secret>` |
 | `GATEWAY_ENV` | Variable | Runtime environment identifier | No | `production` (default: `development`) |
 | `CONTEXT_ROUTER_THRESHOLD` | Variable | Estimated token count that forces large-context routing | No | `100000` (default: `100000`) |
 
@@ -37,7 +37,6 @@ Secrets must never be committed to source control. Set secrets in production usi
 ```bash
 bunx wrangler secret put GEMINI_API_KEY
 bunx wrangler secret put GROQ_API_KEY
-bunx wrangler secret put OPENROUTER_API_KEY
 bunx wrangler secret put GATEWAY_TOKENS
 ```
 
