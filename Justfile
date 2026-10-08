@@ -24,7 +24,7 @@ check-secrets:
 # Validate repository automation without application code or secrets
 check-workflows: lint-workflows
     shellcheck .github/scripts/*.sh
-    git diff --check
+    git diff --check $(git hash-object -t tree /dev/null)
     git diff --cached --check
 
 lint-workflows:
