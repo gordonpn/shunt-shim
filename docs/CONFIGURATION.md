@@ -71,12 +71,14 @@ Client applications should query virtual aliases rather than hardcoded provider 
 
 | Virtual Alias | Primary Provider and Model | First Fallback | Second Fallback | Target Use Case |
 | :--- | :--- | :--- | :--- | :--- |
-| `fast` | Groq (`qwen/qwen3.8-27b` or `openai/gpt-oss-120b`) | Google AI Studio (`gemini-2.5-flash-lite`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Low-latency chat, terminal completions, interactive CLI |
-| `deep` | Google AI Studio (`gemini-2.5-flash`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Google AI Studio (`gemini-2.5-flash-lite`) | Large file analysis, repository context, document summarization |
-| `reasoning` | OpenRouter (`deepseek/deepseek-r1:free`) | Google AI Studio (`gemini-2.5-pro`) | Groq (`llama-3.3-70b-versatile`) | Architectural planning, complex debugging, code generation |
+| `fast` | Groq (`qwen/qwen3.8-27b`) | Google AI Studio (`gemini-2.5-flash-lite`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Low-latency chat, terminal completions, interactive CLI |
+| `deep` | Google AI Studio (`gemini-3.8-flash`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Google AI Studio (`gemini-2.5-flash-lite`) | Large file analysis, repository context, document summarization |
+| `reasoning` | OpenRouter (`deepseek/deepseek-r1:free`) | Google AI Studio (`gemini-2.5-pro`) | Groq (`openai/gpt-oss-120b`) | Architectural planning, complex debugging, code generation |
 
 Direct provider model routing is a deferred proposal. The MVP accepts only fast;
-an unknown alias returns HTTP 404 without an upstream call.
+an unknown alias returns HTTP 404 without an upstream call. `qwen/qwen3.8-27b` is pinned
+as the primary model because it reliably supports all four `tool_choice` variants
+(`auto`, `required`, named, and `none`) without upstream failure.
 
 ## 4. Multi-Tenant Project Tokens and Priority Levels
 

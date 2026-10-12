@@ -14,7 +14,7 @@ check-docs:
 # Resolve deterministic OCR coverage and review rules
 review-docs:
     ocr delegate preview --format json
-    ocr delegate rule --format json Justfile README.md docs/MVP.md docs/COMPATIBILITY.md docs/ARCHITECTURE.md docs/CONFIGURATION.md docs/RUNBOOK.md docs/adr/*.md
+    ocr delegate rule --format json Justfile README.md docs/MVP.md docs/COMPATIBILITY.md docs/ARCHITECTURE.md docs/CONFIGURATION.md docs/RUNBOOK.md docs/adr/*.md docs/GROQ_CAPABILITY.md docs/GEMINI_CAPABILITY.md
 
 # Start local edge development server using wrangler
 dev:

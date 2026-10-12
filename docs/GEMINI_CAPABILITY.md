@@ -14,8 +14,8 @@ Probing `GET https://generativelanguage.googleapis.com/v1beta/openai/models` aga
 | Model ID | Status | Capabilities | Context / Notes |
 | :--- | :--- | :--- | :--- |
 | `gemini-2.5-flash-lite` | Verified Available | Chat, Tools, SSE | 1M context, low latency, active free tier |
-| `gemini-3.8-flash` | Verified Available | Chat, Tools, SSE | High-throughput frontier model |
-| `gemini-2.5-flash` | Deprecated (404) | None | Returns HTTP 404: "no longer available to new users" |
+| `gemini-3.8-flash` | Verified Available (catalog) | Not account-probed | High-throughput frontier model |
+| `gemini-2.5-flash` | Unavailable to new users on tested account (404) | None | Returns HTTP 404: "no longer available to new users" |
 
 `gemini-2.5-flash-lite` is verified as the primary fallback model for `shunt-shim`.
 
@@ -57,8 +57,11 @@ Probing streaming chat completions:
   - Response header: `Content-Type: text/event-stream`.
   - Initial chunk: Emits role delta `{"role": "assistant", "content": "..."}`.
   - Incremental chunks: Stream content updates.
-  - Final chunk: Contains terminal `finish_reason: "stop"` and `usage` object when `stream_options.include_usage: true` is set.
+  - Terminal chunk: When `stream_options.include_usage: true` is requested, Gemini delivers a combined chunk containing both `choices` (with `finish_reason: "stop"`) and the `usage` object.
   - Stream termination: Emits `data: [DONE]`.
+- **Streaming Normalization Requirement**:
+  - Standard OpenAI SSE clients expect a dedicated usage event with `choices: []` immediately preceding `data: [DONE]`.
+  - The gateway streaming normalizer will split Gemini's combined terminal chunk: emit the content chunk with `choices` (omitting `usage`), immediately followed by an event with `choices: []` carrying `usage`, preserving the OpenAI-compatible stream contract.
 
 ## 4. Tool Calling and Tool Results Round Trip
 

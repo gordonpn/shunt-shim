@@ -74,7 +74,7 @@ Native Anthropic/Gemini adapters and a general provider IR are deferred.
 | Parameter / Bound | Value | Units | Enforcement Behavior |
 | :--- | :--- | :--- | :--- |
 | Inbound Request Body Limit | 10,485,760 | bytes (10 MB) | Immediate HTTP 413 `payload_too_large` response prior to JSON parse; zero upstream dispatch. On the Workers Free plan (10 ms CPU limit), parsing near-limit payloads will be benchmarked; streaming parsing or payload ceiling calibration applies if parsing approaches CPU budget. |
-| Shared Context Window Ceiling | 128,000 | tokens | Combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq context on verified models (`openai/gpt-oss-120b`, `qwen/qwen3.8-27b`). PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` prior to upstream dispatch. |
+| Shared Context Window Ceiling | 128,000 | tokens | Combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq context on pinned primary model `qwen/qwen3.8-27b` (128k context). PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` prior to upstream dispatch. |
 | Max Output Tokens Bound | 8,192 | tokens | Accepted in `max_tokens` or `max_completion_tokens`. Both Groq and Gemini support up to 8,192 completion tokens. |
 | Upstream Connect Timeout | 5,000 | ms (5s) | Per-attempt connection deadline. Connection failure or reaching the 5s connect deadline on Attempt 1 triggers eligible fallback before response commitment. |
 | Upstream Attempt Timeout | 60,000 | ms (60s) | Per-attempt execution deadline. Attempt 1 reaching 60s without committing response headers triggers eligible fallback if remaining gateway deadline permits; Attempt 2 reaching 60s triggers HTTP 504 `gateway_timeout`. |
@@ -126,8 +126,11 @@ Validation checks run in the following strict sequential pipeline before upstrea
   and a final finish reason followed by `data: [DONE]`. Preserve fragmented tool
   arguments and multiple calls. Never buffer the entire completion or synthesize
   a successful terminator after upstream failure. With include_usage, preserve
-  the final usage-only event with `choices=[]` before `[DONE]`; provider evidence
-  must establish this capability before claiming streamed-usage compatibility.
+  the final usage-only event with `choices=[]` before `[DONE]`. Groq emits this
+  event natively, while Gemini delivers usage on its final chunk with choices;
+  the gateway streaming normalizer splits Gemini's terminal chunk to emit the
+  standard usage-only event with `choices=[]` before `[DONE]` (see
+  [Gemini verification report](GEMINI_CAPABILITY.md)).
 - Errors use an OpenAI-style `error` object with message, type, param, and code.
   Map invalid input to 400, gateway auth to 401, unknown alias to 404, body limit
   to 413, quota exhaustion to 429, internal failure to 500, invalid upstream

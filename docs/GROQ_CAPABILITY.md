@@ -14,11 +14,11 @@ Probing `GET https://api.groq.com/openai/v1/models` against the active free-tier
 | Model ID | Status | Capabilities | Context / Notes |
 | :--- | :--- | :--- | :--- |
 | `openai/gpt-oss-120b` | Verified Available | Chat, Reasoning, Tools, SSE | 128k context, emits `reasoning_tokens` |
-| `openai/gpt-oss-20b` | Verified Available | Chat, Reasoning, Tools, SSE | Lightweight reasoning model |
+| `openai/gpt-oss-20b` | Verified Available (catalog) | Not account-probed | Lightweight reasoning model |
 | `qwen/qwen3.8-27b` | Verified Available | Chat, Tools, SSE | Fast standard chat completions |
 | `llama-3.3-70b-versatile` | Not Available (404) | None | Returns HTTP 404 `model_not_found` |
 
-`llama-3.3-70b-versatile` is not accessible on this account tier. Either `openai/gpt-oss-120b` or `qwen/qwen3.8-27b` serves as the primary chat model.
+`llama-3.3-70b-versatile` is not accessible on this account tier. `qwen/qwen3.8-27b` is selected and pinned as the primary chat model for `fast` because it reliably passes all required completion, streaming, and tool tests without unexpected upstream validation failures.
 
 ## 2. Text JSON Completions
 
@@ -88,4 +88,4 @@ Probing tool calling with a function declaration (`get_file_diff`):
   - `auto`: HTTP 200, model decides to invoke tool.
   - `required`: HTTP 200, forces tool invocation (`finish_reason: "tool_calls"`).
   - Named function (`{"type": "function", "function": {"name": "..."}}`): HTTP 200, forces specific tool invocation.
-  - `none`: Supported on `qwen/qwen3.8-27b` (`finish_reason: "stop"`). Note that `openai/gpt-oss-120b` errors if `tool_choice: "none"` is supplied alongside tools and the model attempts tool generation.
+  - `none`: Supported on `qwen/qwen3.8-27b` (HTTP 200, `finish_reason: "stop"`, zero tool calls emitted). In contrast, `openai/gpt-oss-120b` failed when tested with `tool_choice: "none"` (the model attempted tool generation and returned HTTP 400 `tool_use_failed`), disqualifying it as the unmapped primary model.
