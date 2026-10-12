@@ -1,8 +1,8 @@
 # MVP Scope and Deployment Options
 
-Status: proposal, not implemented. The repository currently contains design
-documentation, environment examples, and task-runner scaffolding, but no gateway
-implementation. Language and deployment platform remain undecided.
+Status: runtime and request bounds agreed, not implemented. The runtime and
+deployment target is agreed as Cloudflare Workers (TypeScript / Hono) under Task #4
+of Story #3. See [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
 The other architecture, configuration, and runbook documents describe the broader
 design. Their commands and capabilities are not evidence of a working gateway.
@@ -161,21 +161,37 @@ For every target, verify that the ingress does not buffer SSE, client disconnect
 cancel upstream work, and proxy timeouts exceed the gateway's bounded deadline.
 Keep deployment configuration version-controlled and credentials outside it.
 
-### Shortlist
+### Selected Target: Cloudflare Workers (TypeScript / Hono)
 
-- Choose **Workers** when minimal operations and free hosting matter more than
-  a conventional runtime.
-- Choose **an existing server** when native Go or another preferred language,
-  low incremental cost, and portability matter most.
-- Choose **Cloud Run** when a conventional container runtime and managed
-  operations matter enough to accept billing risk and cold starts.
-- Consider **Fly.io** when a small paid service is acceptable and a conventional
-  runtime is preferable to edge-specific APIs.
-- Choose **a local daemon** only if the initial requirement is single-machine use.
+Cloudflare Workers with TypeScript and the Hono framework is selected as the
+sole deployment and runtime target for the MVP (see
+[ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md)).
 
-Do not implement multiple deployment targets for the MVP. Select one after
-confirming the preferred language, whether an always-on server is available,
-and whether zero possible hosting spend is a requirement.
+Selected zero-spend managed edge hosting and native Web Standards streams over
+a conventional server process, operating within the 10 ms CPU time limit per
+request on the Workers Free plan where upstream network wait time consumes no CPU budget.
+
+Rationale:
+- **Zero hosting spend**: Operates within the Cloudflare Workers Free allowance
+  (100,000 requests/day, 10 ms CPU time per request; upstream network waiting does
+  not consume CPU time).
+- **Managed operations & HTTPS**: Zero server upkeep, automatic TLS termination,
+  and globally distributed edge ingress.
+- **Streaming & Web APIs**: Direct access to standard `fetch`, `Request`,
+  `Response`, and `ReadableStream` primitives with Hono routing.
+- **Local developer workflow**: Reproducible local emulation using Wrangler
+  (`bunx wrangler dev`) without local containers.
+
+Rejected alternatives:
+- **Existing always-on server**: Rejected due to persistent maintenance burden,
+  OS updates, manual TLS renewals, and operating overhead.
+- **Google Cloud Run**: Rejected due to cold-start latency, container
+  registry/build complexity, and variable billing risk on outbound network egress
+  and idle compute.
+- **Fly.io Machine**: Rejected because free trials are not permanent free tiers
+  and new organizations require paid billing verification.
+- **Local daemon**: Rejected because GitHub Actions runners cannot reach local
+  ports without tunneling, and the service sleeps when the host machine sleeps.
 
 Sources checked on 2026-10-05:
 

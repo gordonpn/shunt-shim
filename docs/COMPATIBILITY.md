@@ -66,6 +66,35 @@ Use the two upstreams' OpenAI-compatible endpoints and a small validated request
 representation. Normalize output limits and approved extensions at dispatch.
 Native Anthropic/Gemini adapters and a general provider IR are deferred.
 
+### Shared request bounds
+
+| Parameter / Bound | Value | Units | Enforcement Behavior |
+| :--- | :--- | :--- | :--- |
+| Inbound Request Body Limit | 10,485,760 | bytes (10 MB) | Immediate HTTP 413 `payload_too_large` response prior to JSON parse; zero upstream dispatch. |
+| Shared Context Window Ceiling | 128,000 | tokens | PR-Agent configured with `config.custom_model_max_tokens=128000`. Bounded by Groq Llama-3.3-70b-versatile context. |
+| Max Output Tokens Bound | 8,192 | tokens | Accepted in `max_tokens` or `max_completion_tokens`. Both Groq and Gemini support up to 8,192 completion tokens. |
+| Upstream Connect Timeout | 5,000 | ms (5s) | Per-attempt connection deadline. Socket failure or timeout under 5s triggers eligible fallback before commitment. |
+| Upstream Attempt Timeout | 60,000 | ms (60s) | Per-attempt execution deadline. Triggers fallback on Attempt 1; triggers HTTP 504 on Attempt 2. |
+| Total Gateway Deadline | 150,000 | ms (150s) | Bounded wall-clock deadline across both attempts. Expiration terminates request with HTTP 504 `gateway_timeout`. |
+
+Client and ingress timeout alignment:
+- DeepSeek Review v1 Nu review script default timeout: 180 seconds.
+- OpenCodeReview default LLM client timeout: 300 seconds.
+- PR-Agent LiteLLM default client timeout: 300 seconds.
+- Cloudflare Workers edge network streaming timeout: 150 to 300 seconds.
+All client and edge ingress timeouts exceed the gateway's 150s bounded total deadline.
+
+### Unsupported methods and endpoints
+
+| Endpoint Path | HTTP Method | Gateway Status | Error Code | Response Details |
+| :--- | :--- | :--- | :--- | :--- |
+| `/v1/chat/completions`, `/chat/completions` | GET, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Header `Allow: POST`. Zero upstream invocation. |
+| `/v1/models` | POST, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Header `Allow: GET`. Zero upstream invocation. |
+| `/v1/embeddings`, `/v1/completions`, `/v1/responses`, `/v1/audio/*` | Any | 404 Not Found | `invalid_request_error` | Unsupported endpoint. Zero upstream invocation. |
+| Any valid path | Any | 413 Payload Too Large | `payload_too_large` | Body size > 10,485,760 bytes. Zero upstream invocation. |
+| Any path | Any | 401 Unauthorized | `invalid_api_key` | Missing, malformed, or mismatching gateway credentials. Zero upstream invocation. |
+| `/v1/chat/completions`, `/chat/completions` | POST | 404 Not Found | `model_not_found` | Unknown model alias (model string other than `fast`). Zero upstream invocation. |
+
 ## Response and failure contract
 
 - JSON responses have `id`, `object=chat.completion`, Unix `created`, model,
@@ -99,6 +128,39 @@ Native Anthropic/Gemini adapters and a general provider IR are deferred.
   deadline. Fallback eligibility and response commitment follow [MVP](MVP.md).
   No replay after downstream headers/body are committed. Select deadlines within
   each client's timeout and configure ingress timeouts above the gateway bound.
+
+### Downstream commitment point (streaming)
+
+The downstream commitment point is defined as the moment the gateway flushes HTTP 200 response headers (`Content-Type: text/event-stream`) and the initial SSE event chunk (`data: {"id":...}`) to the downstream client.
+
+- **Provider lock**: Once committed, the chosen upstream provider is locked.
+- **Zero mid-stream replay**: The gateway will strictly never replay a request on the fallback provider once streaming has commenced. Replaying mid-stream would emit duplicated, corrupt, or non-deterministic completions to the client.
+- **Mid-stream failure handling**: If the upstream provider disconnects, aborts, or errors after downstream commitment, the gateway terminates the downstream connection immediately without emitting a synthetic `data: [DONE]` terminator. The client's SSE parser observes an incomplete stream and triggers client-side retry or error handling.
+- **Client disconnect**: If the client disconnects or aborts the connection at any time, the gateway immediately cancels active upstream fetches via `AbortController`.
+
+### Mixed-failure mapping and observable outcomes
+
+When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, or connect timeout < 5s) before downstream commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 150s total deadline.
+
+The returned HTTP status code and OpenAI-compatible error object match the final failing attempt:
+
+| Primary Attempt (Groq) | Fallback Attempt (Gemini) | Gateway Status | Error Code | Observable Outcome / Behavior |
+| :--- | :--- | :--- | :--- | :--- |
+| 429 Too Many Requests | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| 503 Service Unavailable | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| Connect Timeout (>5s) | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| 429 Too Many Requests | 429 Too Many Requests | 429 | `rate_limit_exceeded` | All providers rate-limited; preserve `Retry-After` from final attempt. |
+| 429 Too Many Requests | 503 Service Unavailable | 503 | `service_unavailable` | Final attempt unavailable; return 503 error. |
+| 503 Service Unavailable | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
+| 503 Service Unavailable | 503 Service Unavailable | 503 | `service_unavailable` | Both providers unavailable; return 503 error. |
+| Eligible failure (429/503) | Attempt Timeout (>60s) | 504 | `gateway_timeout` | Fallback attempt timed out; return 504 error. |
+| Eligible failure (429/503) | Total Deadline (>150s) | 504 | `gateway_timeout` | Bounded gateway deadline expired; return 504 error. |
+| Connect Timeout (>5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
+| Connect Timeout (>5s) | Connect Timeout (>5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
+| 400 Bad Request | (No fallback) | 502 | `bad_gateway` | Upstream validation failure; do not retry; return 502 error. |
+| 401 / 403 Unauthorized | (No fallback) | 502 | `bad_gateway` | Upstream credential failure; do not expose upstream keys; return 502 error. |
+| 200 SSE committed | Disconnect / error | 200 | (Aborted) | Stream severed without `[DONE]`; zero fallback replay. |
+| Client disconnect | (In progress) | (Closed) | (Aborted) | Abort upstream fetch immediately via AbortController. |
 
 ## Evidence required before compatibility claims
 
