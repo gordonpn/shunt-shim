@@ -27,9 +27,16 @@ tail:
 
 # Validate environment secrets
 check-secrets:
-    @test -n "$$GEMINI_API_KEY" || echo "GEMINI_API_KEY is not set"
-    @test -n "$$GROQ_API_KEY" || echo "GROQ_API_KEY is not set"
-    @test -n "$$OPENROUTER_API_KEY" || echo "OPENROUTER_API_KEY is not set"
+    @status=0; \
+    if [ -z "${GEMINI_API_KEY:-}" ]; then \
+        echo "Missing required environment variable: GEMINI_API_KEY" >&2; \
+        status=1; \
+    fi; \
+    if [ -z "${GROQ_API_KEY:-}" ]; then \
+        echo "Missing required environment variable: GROQ_API_KEY" >&2; \
+        status=1; \
+    fi; \
+    exit $status
 
 # Validate repository automation without application code or secrets
 check-workflows: lint-workflows
