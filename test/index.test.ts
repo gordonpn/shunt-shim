@@ -181,6 +181,40 @@ describe("Gateway HTTP Entrypoint", () => {
       expect(body.error.code).toBe("invalid_json");
     });
 
+    it("returns 400 on non-object JSON body such as null or arrays", async () => {
+      const resNull = await app.request(
+        "/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer test-token-12345",
+            "Content-Type": "application/json",
+          },
+          body: "null",
+        },
+        mockEnv,
+      );
+      expect(resNull.status).toBe(400);
+      const bodyNull = (await resNull.json()) as { error: { code: string } };
+      expect(bodyNull.error.code).toBe("invalid_json");
+
+      const resArray = await app.request(
+        "/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer test-token-12345",
+            "Content-Type": "application/json",
+          },
+          body: "[]",
+        },
+        mockEnv,
+      );
+      expect(resArray.status).toBe(400);
+      const bodyArray = (await resArray.json()) as { error: { code: string } };
+      expect(bodyArray.error.code).toBe("invalid_json");
+    });
+
     it("returns 404 when requested model is unknown or missing", async () => {
       const resUnknown = await app.request(
         "/v1/chat/completions",

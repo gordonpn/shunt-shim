@@ -122,9 +122,9 @@ interface ChatCompletionRequestBody {
 }
 
 const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
-  let body: ChatCompletionRequestBody = {};
+  let parsed: unknown;
   try {
-    body = await c.req.json<ChatCompletionRequestBody>();
+    parsed = await c.req.json();
   } catch {
     return c.json(
       createErrorResponse(
@@ -135,6 +135,19 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
       400,
     );
   }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return c.json(
+      createErrorResponse(
+        "Invalid JSON request body",
+        "invalid_request_error",
+        "invalid_json",
+      ),
+      400,
+    );
+  }
+
+  const body = parsed as ChatCompletionRequestBody;
 
   if (!body.model || body.model !== "fast") {
     return c.json(

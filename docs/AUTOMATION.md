@@ -12,8 +12,8 @@ and `build` package scripts. Node 22 is configured via `actions/setup-node`, and
 `pnpm/action-setup` automatically derives `pnpm@10.28.1` from `packageManager`.
 
 Reviewdog runs on pull requests. Actionlint review comments run for same-repository
-PRs; read-only CI linting still covers forks. Biome reporting executes against
-`biome.json` using the configured strict linting rules. Its pipeline fails if
+PRs; read-only CI linting still covers forks. Biome reporting additionally waits
+for biome.json or biome.jsonc and both pnpm project files. Its pipeline fails if
 either Biome or reviewdog fails, including failures that produce no diagnostics.
 
 Action references are pinned to checked commits. Verification tools are declared
