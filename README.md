@@ -2,7 +2,7 @@
 
 Status: design proposal, not yet implemented. See [the proposed MVP and deployment options](docs/MVP.md) for the initial scope, acceptance criteria, and language/platform trade-offs. The capabilities and setup instructions below describe the broader planned design.
 
-`shunt-shim` is a proposed OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP would expose one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. No gateway capabilities are implemented yet; language and deployment platform remain undecided.
+`shunt-shim` is a proposed OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP would expose one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. No gateway capabilities are implemented yet; Cloudflare Workers (TypeScript / Hono) has been accepted as the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md)).
 
 The goal is to let DeepSeek Review, OpenCodeReview, and PR-Agent use one endpoint without client code changes. Compatibility requires deployed evidence for all three, including OpenCodeReview's tool-call round trip. See the [pinned client sources and contract](docs/COMPATIBILITY.md).
 
@@ -38,7 +38,7 @@ For a comprehensive catalog of always-free compute, storage, edge networks, and 
 
 ## Planned Cloudflare Quickstart
 
-These examples are not runnable yet: the Worker entrypoint and Wrangler configuration do not exist. Use them only after implementation and if Cloudflare is the selected deployment platform. The MVP requires no KV namespace.
+These examples are not runnable yet: the Worker entrypoint and Wrangler configuration do not exist. Use them after implementation of the accepted Cloudflare Workers target. The MVP requires no KV namespace.
 
 ### 1. Prerequisites
 - `bun` or `node`

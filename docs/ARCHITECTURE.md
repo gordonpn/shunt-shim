@@ -14,11 +14,12 @@ The topology and tenant/context proposals below are deferred design alternatives
 ## 1. System Overview
 
 The MVP presents an OpenAI Chat Completions HTTP interface to three review clients
-and dispatches through compatible Groq/Gemini endpoints. Platform selection remains
-open; the extended tenant/context pipeline later in this document is deferred. In
-extended architectures beyond the zero-cost MVP, exhausting free allowances can
-optionally route to a funded DeepSeek API balance as an emergency safety net to prevent
-workflow interruption.
+and dispatches through compatible Groq/Gemini endpoints. The runtime and deployment
+target is agreed as Cloudflare Workers (TypeScript / Hono)
+(see [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md)); the extended
+tenant/context pipeline later in this document is deferred. In extended architectures
+beyond the zero-cost MVP, exhausting free allowances can optionally route to a funded
+DeepSeek API balance as an emergency safety net to prevent workflow interruption.
 
 ```
 +-------------------------------------------------------------+
@@ -46,7 +47,7 @@ workflow interruption.
 
 ## 2. Platform Selection: Edge Worker vs Local Daemon
 
-For single-machine isolated development, a compiled Go binary running as a local daemon on `127.0.0.1:8080` is one option. A Cloudflare Worker is an alternative for managed public ingress. Language and deployment platform remain undecided; see [deployment options](MVP.md#deployment-options).
+Cloudflare Workers (TypeScript / Hono) is selected as the sole deployment and runtime target for the MVP (see [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md)). For single-machine isolated development, a compiled Go binary running as a local daemon on `127.0.0.1:8080` was evaluated as an alternative, but edge deployment was selected for zero host maintenance, global HTTPS termination, and direct accessibility from GitHub Actions. See [deployment options](MVP.md#deployment-options).
 
 ### Global Quota Synchronization
 Free-tier providers enforce account-level constraints shared by all clients. A centralized ingress alone does not guarantee synchronized quota accounting. Cloudflare KV is eventually consistent and lacks atomic read-modify-write operations, so concurrent counter updates can overwrite each other and cannot reliably enforce global quotas. The MVP defers accounting. If strict coordination becomes necessary on Workers, evaluate Durable Objects with transactional storage rather than KV counters. See [KV consistency](https://developers.cloudflare.com/kv/concepts/how-kv-works/).

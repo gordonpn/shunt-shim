@@ -1,8 +1,8 @@
 # MVP Scope and Deployment Options
 
-Status: proposal, not implemented. The repository currently contains design
-documentation, environment examples, and task-runner scaffolding, but no gateway
-implementation. Language and deployment platform remain undecided.
+Status: runtime and request bounds agreed, not implemented. The runtime and
+deployment target is agreed as Cloudflare Workers (TypeScript / Hono).
+See [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
 The other architecture, configuration, and runbook documents describe the broader
 design. Their commands and capabilities are not evidence of a working gateway.
@@ -28,7 +28,7 @@ If every eligible provider is exhausted, return an explicit error.
 | Models | Explicit allowlist of models verified available on the configured accounts' free tiers |
 | Responses | Non-streaming JSON and streaming SSE |
 | Coding support | System/user/assistant/tool messages, function tools, tool results, both token-limit fields, optional reasoning metadata and usage |
-| Failover | At most one fallback attempt, on upstream HTTP 429, HTTP 503, or a connection timeout |
+| Failover | At most one fallback attempt, on upstream HTTP 429, HTTP 503, connect failure / 5s connect timeout, or 60s Attempt 1 timeout |
 | Safety | Authentication and payload validation before upstream dispatch; body limits, bounded timeouts, and cancellation |
 | Diagnostics | Provider, actual model, status, latency, and fallback reason; no prompts, completions, or credentials |
 
@@ -154,28 +154,45 @@ has low incremental cost only if capacity and operational support already exist.
 
 Workers Free currently allows 100,000 requests per day and 10 ms of CPU time per
 HTTP request. Waiting for upstream network responses does not consume that CPU
-budget, but parsing and validating large payloads does. Verify CPU usage with the
-largest supported request before choosing the free plan.
+budget, but parsing and validating large payloads does. Benchmark parsing near the
+10 MB payload ceiling during implementation; calibrate payload bounds or adopt
+streaming validation if parsing approaches the CPU budget.
 
 For every target, verify that the ingress does not buffer SSE, client disconnects
 cancel upstream work, and proxy timeouts exceed the gateway's bounded deadline.
 Keep deployment configuration version-controlled and credentials outside it.
 
-### Shortlist
+### Selected Target: Cloudflare Workers (TypeScript / Hono)
 
-- Choose **Workers** when minimal operations and free hosting matter more than
-  a conventional runtime.
-- Choose **an existing server** when native Go or another preferred language,
-  low incremental cost, and portability matter most.
-- Choose **Cloud Run** when a conventional container runtime and managed
-  operations matter enough to accept billing risk and cold starts.
-- Consider **Fly.io** when a small paid service is acceptable and a conventional
-  runtime is preferable to edge-specific APIs.
-- Choose **a local daemon** only if the initial requirement is single-machine use.
+Cloudflare Workers with TypeScript and the Hono framework is selected as the
+sole deployment and runtime target for the MVP (see
+[ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md)).
 
-Do not implement multiple deployment targets for the MVP. Select one after
-confirming the preferred language, whether an always-on server is available,
-and whether zero possible hosting spend is a requirement.
+Selected zero-spend managed edge hosting and native Web Standards streams over
+a conventional server process, operating within the 10 ms CPU time limit per
+request on the Workers Free plan where upstream network wait time consumes no CPU budget.
+
+Rationale:
+- **Zero hosting spend**: Operates within the Cloudflare Workers Free allowance
+  (100,000 requests/day, 10 ms CPU time per request; upstream network waiting does
+  not consume CPU time).
+- **Managed operations & HTTPS**: Zero server upkeep, automatic TLS termination,
+  and globally distributed edge ingress.
+- **Streaming & Web APIs**: Direct access to standard `fetch`, `Request`,
+  `Response`, and `ReadableStream` primitives with Hono routing.
+- **Local developer workflow**: Reproducible local emulation using Wrangler
+  (`bunx wrangler dev`) without local containers.
+
+Rejected alternatives:
+- **Existing always-on server**: Rejected due to persistent maintenance burden,
+  OS updates, manual TLS renewals, and operating overhead.
+- **Google Cloud Run**: Rejected due to cold-start latency, container
+  registry/build complexity, and variable billing risk on outbound network egress
+  and idle compute.
+- **Fly.io Machine**: Rejected because free trials are not permanent free tiers
+  and new organizations require paid billing verification.
+- **Local daemon**: Rejected because GitHub Actions runners cannot reach local
+  ports without tunneling, and the service sleeps when the host machine sleeps.
 
 Sources checked on 2026-10-05:
 
