@@ -1,8 +1,8 @@
 # shunt-shim
 
-Status: design proposal, not yet implemented. See [the proposed MVP and deployment options](docs/MVP.md) for the initial scope, acceptance criteria, and language/platform trade-offs. The capabilities and setup instructions below describe the broader planned design.
+Status: Cloudflare Worker service bootstrapped with reproducible quality gates. See [the proposed MVP and deployment options](docs/MVP.md) for the initial scope, acceptance criteria, and language/platform trade-offs. The capabilities and setup instructions below describe the implemented foundation and planned routing.
 
-`shunt-shim` is a proposed OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP would expose one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. No gateway capabilities are implemented yet; Cloudflare Workers (TypeScript / Hono) has been accepted as the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md)).
+`shunt-shim` is a planned OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP exposes one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. Cloudflare Workers (TypeScript / Hono) has been accepted and bootstrapped as the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md)).
 
 The goal is to let DeepSeek Review, OpenCodeReview, and PR-Agent use one endpoint without client code changes. Compatibility requires deployed evidence for all three, including OpenCodeReview's tool-call round trip. See the [pinned client sources and contract](docs/COMPATIBILITY.md).
 
@@ -36,19 +36,20 @@ Shared accounting, proactive quota checks, tenant priorities, context routing, `
 
 For a comprehensive catalog of always-free compute, storage, edge networks, and LLMs, consult [docs/FREE_TIERS.md](docs/FREE_TIERS.md).
 
-## Planned Cloudflare Quickstart
+## Cloudflare Quickstart
 
-These examples are not runnable yet: the Worker entrypoint and Wrangler configuration do not exist. Use them after implementation of the accepted Cloudflare Workers target. The MVP requires no KV namespace.
+The Worker entrypoint and Wrangler configuration are runnable. Follow the steps below to run locally or verify quality gates. The MVP requires no KV namespace.
 
 ### 1. Prerequisites
-- `bun` or `node`
+- `node` (v22+) and `pnpm` (v10+)
 - `just` task runner
 - Cloudflare account with Workers enabled
 - Free API keys from [Google AI Studio](https://aistudio.google.com) and [Groq](https://console.groq.com)
 
 ### 2. Local Setup
-Clone the repository and set up local development variables:
+Install dependencies and set up local development variables:
 ```bash
+pnpm install
 cp .env.example .dev.vars
 ```
 
@@ -59,8 +60,11 @@ GROQ_API_KEY="gsk_..."
 GATEWAY_TOKENS="<one-random-gateway-secret>"
 ```
 
-Start the local development server:
+Validate secrets, check types, run tests, and start the local development server:
 ```bash
+just check-secrets
+just typecheck
+just test
 just dev
 ```
 The gateway will start listening on `http://127.0.0.1:8787`.
@@ -69,9 +73,9 @@ The gateway will start listening on `http://127.0.0.1:8787`.
 Store secrets and deploy to the edge:
 ```bash
 # Store upstream credentials securely as edge secrets
-bunx wrangler secret put GEMINI_API_KEY
-bunx wrangler secret put GROQ_API_KEY
-bunx wrangler secret put GATEWAY_TOKENS
+pnpm exec wrangler secret put GEMINI_API_KEY
+pnpm exec wrangler secret put GROQ_API_KEY
+pnpm exec wrangler secret put GATEWAY_TOKENS
 
 # Deploy to Cloudflare edge
 just deploy

@@ -2,7 +2,7 @@
 
 This runbook documents setup, deployment, verification, monitoring, and incident response procedures for `shunt-shim`.
 
-Status: proposed Cloudflare workflow, not currently runnable. The Worker entrypoint and Wrangler configuration do not exist. The [MVP](MVP.md) defers shared accounting and requires no KV namespace; Cloudflare Workers (TypeScript / Hono) has been accepted as the target deployment runtime under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
+Status: Cloudflare Workers deployment runnable. The Worker entrypoint and Wrangler configuration are implemented under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md). The [MVP](MVP.md) defers shared accounting and requires no KV namespace.
 
 MVP prerequisites override the broader examples: only Groq/Gemini keys and one
 random gateway secret are required. Use [client configuration](COMPATIBILITY.md)
@@ -14,9 +14,9 @@ bound; OpenCodeReview defaults to 300 seconds, not an unlimited request lifetime
 ## 1. Prerequisites and Local Environment
 
 Ensure the following tools are installed:
-- `bun` (v1.1+ recommended) or `node` (v20+)
+- `node` (v22+) and `pnpm` (v10+)
 - `just` (command runner)
-- `wrangler` (Cloudflare Workers CLI, available via `bunx wrangler`)
+- `wrangler` (Cloudflare Workers CLI, available via `pnpm exec wrangler`)
 
 Ensure active developer accounts and API keys from upstream providers:
 - Google AI Studio API Key ([aistudio.google.com](https://aistudio.google.com))
@@ -52,15 +52,15 @@ Ensure active developer accounts and API keys from upstream providers:
 
 ### Step 1: Authenticate with Cloudflare
 ```bash
-bunx wrangler login
+pnpm exec wrangler login
 ```
 
 ### Step 2: Provision Edge Secrets
 Store credentials securely in Cloudflare:
 ```bash
-bunx wrangler secret put GEMINI_API_KEY
-bunx wrangler secret put GROQ_API_KEY
-bunx wrangler secret put GATEWAY_TOKENS
+pnpm exec wrangler secret put GEMINI_API_KEY
+pnpm exec wrangler secret put GROQ_API_KEY
+pnpm exec wrangler secret put GATEWAY_TOKENS
 ```
 
 ### Step 3: Deploy Worker
