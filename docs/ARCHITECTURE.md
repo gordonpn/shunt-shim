@@ -15,7 +15,7 @@ The topology and tenant/context proposals below are deferred design alternatives
 
 The MVP presents an OpenAI Chat Completions HTTP interface to three review clients
 and dispatches through compatible Groq/Gemini endpoints. The runtime and deployment
-target is agreed as Cloudflare Workers (TypeScript / Hono) under Task #4 of Story #3
+target is agreed as Cloudflare Workers (TypeScript / Hono)
 (see [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md)); the extended
 tenant/context pipeline later in this document is deferred. In extended architectures
 beyond the zero-cost MVP, exhausting free allowances can optionally route to a funded

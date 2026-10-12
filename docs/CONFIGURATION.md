@@ -55,13 +55,15 @@ The following illustrative sample assumes a TypeScript Worker deployment. It is 
   "name": "shunt-shim",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
   "vars": {
     "GATEWAY_ENV": "production",
     "CONTEXT_ROUTER_THRESHOLD": "100000"
   }
 }
 ```
+
+The `enable_request_signal` flag enables downstream client disconnect detection through `Request.signal` in the Workers runtime, allowing the gateway to abort in-flight upstream fetches via `AbortController` when clients close their connection.
 
 ## 3. Virtual Model Aliases and Routing Matrix
 

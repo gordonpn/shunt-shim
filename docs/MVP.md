@@ -1,8 +1,8 @@
 # MVP Scope and Deployment Options
 
 Status: runtime and request bounds agreed, not implemented. The runtime and
-deployment target is agreed as Cloudflare Workers (TypeScript / Hono) under Task #4
-of Story #3. See [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
+deployment target is agreed as Cloudflare Workers (TypeScript / Hono).
+See [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
 The other architecture, configuration, and runbook documents describe the broader
 design. Their commands and capabilities are not evidence of a working gateway.
@@ -28,7 +28,7 @@ If every eligible provider is exhausted, return an explicit error.
 | Models | Explicit allowlist of models verified available on the configured accounts' free tiers |
 | Responses | Non-streaming JSON and streaming SSE |
 | Coding support | System/user/assistant/tool messages, function tools, tool results, both token-limit fields, optional reasoning metadata and usage |
-| Failover | At most one fallback attempt, on upstream HTTP 429, HTTP 503, or a connection timeout |
+| Failover | At most one fallback attempt, on upstream HTTP 429, HTTP 503, connect failure / 5s connect timeout, or 60s Attempt 1 timeout |
 | Safety | Authentication and payload validation before upstream dispatch; body limits, bounded timeouts, and cancellation |
 | Diagnostics | Provider, actual model, status, latency, and fallback reason; no prompts, completions, or credentials |
 
@@ -154,8 +154,9 @@ has low incremental cost only if capacity and operational support already exist.
 
 Workers Free currently allows 100,000 requests per day and 10 ms of CPU time per
 HTTP request. Waiting for upstream network responses does not consume that CPU
-budget, but parsing and validating large payloads does. Verify CPU usage with the
-largest supported request before choosing the free plan.
+budget, but parsing and validating large payloads does. Benchmark parsing near the
+10 MB payload ceiling during implementation; calibrate payload bounds or adopt
+streaming validation if parsing approaches the CPU budget.
 
 For every target, verify that the ingress does not buffer SSE, client disconnects
 cancel upstream work, and proxy timeouts exceed the gateway's bounded deadline.

@@ -28,24 +28,25 @@ Key constraints:
 
 3. **Shared Request Bounds**:
    - **Inbound Body Limit**: 10,485,760 bytes (10 MB). Payloads exceeding this ceiling return HTTP 413 Payload Too Large immediately without dispatching upstream requests.
-   - **Shared Context Ceiling**: 128,000 tokens. Bounded by Groq's 128k context window on Llama-3.3-70b-versatile. PR-Agent configured with `config.custom_model_max_tokens=128000`.
+   - **Shared Context Ceiling**: 128,000 tokens combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq context on Llama-3.3-70b-versatile. PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` before upstream dispatch.
    - **Output Limit**: 8,192 tokens max completion tokens (`max_tokens` or `max_completion_tokens`), matching Groq and Gemini output ceilings.
    - **Timeouts and Deadlines**:
      - Upstream Connect Timeout: 5,000 ms (5s) per attempt.
      - Upstream Attempt Timeout: 60,000 ms (60s) per attempt.
      - Total Gateway Deadline: 150,000 ms (150s) bounded across all attempts.
-     - Client and Ingress Alignment: Client timeouts exceed the gateway total deadline (DeepSeek Review default 180s, OpenCodeReview default 300s, PR-Agent default 300s). Cloudflare Workers streaming edge timeout accommodates the 150s window.
+     - Client and Ingress Alignment: Client timeouts exceed the gateway total deadline (DeepSeek Review default 180s, OpenCodeReview default 300s, PR-Agent default 300s). Cloudflare Workers streaming edge timeout (180-300s) exceeds the 150s gateway deadline by at least 30s to guarantee delivery of HTTP 504 responses.
+     - Client Disconnect Cancellation: Worker environment enables `enable_request_signal` compatibility flag, propagating client disconnection through `Request.signal` to abort active upstream requests via `AbortController`.
 
 4. **Streaming Commitment Point**:
-   Once HTTP 200 response headers and the first SSE chunk (`data: {"id":...}`) are flushed downstream to the client, the provider choice is locked. Requests are never replayed on the fallback provider mid-stream. If the active stream fails, the connection aborts without a synthesized `data: [DONE]` marker.
+   Once HTTP 200 response headers (`Content-Type: text/event-stream`) are flushed downstream to the client, the provider choice is locked. Once headers are committed to the network, status cannot be converted to an error or fallback response. Requests are never replayed on the fallback provider mid-stream. If the active stream fails, disconnects, or hits a deadline, the connection aborts without a synthesized `data: [DONE]` marker.
 
 5. **Mixed Failure and Error Mapping**:
-   Fallback is permitted only prior to downstream response commitment on eligible errors (HTTP 429, HTTP 503, connect timeout). When both attempts fail, the gateway returns the error class of the final failing attempt:
+   Fallback is permitted only prior to downstream response header commitment on eligible errors (HTTP 429, HTTP 503, connect failure / 5s connect timeout, and 60s Attempt 1 execution timeout if remaining gateway deadline permits). When both attempts fail, the gateway returns the error class of the final failing attempt:
    - Primary 429 and Fallback 429: HTTP 429 with preserved `Retry-After`.
    - Primary 429 and Fallback 503: HTTP 503.
    - Primary 503 and Fallback 429: HTTP 429.
    - Primary 503 and Fallback 503: HTTP 503.
-   - Primary eligible failure and Fallback Timeout: HTTP 504.
+   - Primary eligible failure (429/503/timeout) and Fallback Timeout: HTTP 504.
    - Primary connect timeout and Fallback 429: HTTP 429.
    - Primary connect timeout and Fallback connect timeout: HTTP 504.
    - Ineligible primary errors (400, 401, 403, 500): Terminate immediately with HTTP 502 without fallback attempt.

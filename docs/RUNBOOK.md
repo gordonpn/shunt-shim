@@ -2,7 +2,7 @@
 
 This runbook documents setup, deployment, verification, monitoring, and incident response procedures for `shunt-shim`.
 
-Status: proposed Cloudflare workflow, not currently runnable. The Worker entrypoint and Wrangler configuration do not exist. The [MVP](MVP.md) defers shared accounting and requires no KV namespace; deployment platform selection remains open.
+Status: proposed Cloudflare workflow, not currently runnable. The Worker entrypoint and Wrangler configuration do not exist. The [MVP](MVP.md) defers shared accounting and requires no KV namespace; Cloudflare Workers (TypeScript / Hono) has been accepted as the target deployment runtime under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
 MVP prerequisites override the broader examples: only Groq/Gemini keys and one
 random gateway secret are required. Use [client configuration](COMPATIBILITY.md)
