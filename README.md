@@ -28,10 +28,11 @@ Shared accounting, proactive quota checks, tenant priorities, context routing, `
 
 | Provider | Top Models | Free Quotas | Context | Primary Strength | Constraints |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| Google AI Studio | Gemini 2.5 / 3.8 Flash, Flash-Lite, Pro | 1,000 RPD (Flash-Lite), 250-500 RPD (Flash) | 1,000,000 tokens | Massive token context, multimodal inputs | Quotas reset at 00:00 UTC; free tier prompts subject to model training |
-| Groq | Llama 3.3 70B, Llama 3.1 8B | 14,400 RPD (8B), ~1,000 RPD (70B), ~30 RPM | 128,000 tokens | Ultra-low latency (250-300+ tok/s on 70B) | Enforces strict rolling per-minute token buckets (TPM) |
-| OpenRouter (:free) | DeepSeek R1, Llama 3.3 70B, Qwen 2.5 72B | ~20 RPM, ~200 RPD | Up to 128k-1M tokens | Unified catalog for open-weight frontier models | Shared public capacity subject to queue latency |
-| Cloudflare Workers AI | Llama 3.3 70B, Mistral 7B, DeepSeek Distill | 10,000 Neurons/day (~1,000 queries) | 8k-128k tokens | Native edge invocation without credential management | Lower context windows |
+| Google AI Studio | Gemini 2.5 / 3.8 Flash, Flash-Lite | Free input/output tokens on eligible models; 1,000 RPD (Flash-Lite) | 1,000,000 tokens | Massive token context, multimodal inputs | Quotas reset at 00:00 UTC; free tier prompts subject to model training |
+| Groq | GPT-OSS 120B/20B, Qwen, Llama 3.3 | 1,000 RPD, 30 RPM, 8,000 TPM | 128,000 tokens | Ultra-low latency inference | Enforces strict rolling per-minute token buckets (TPM) |
+| OpenRouter (:free) | DeepSeek R1, Llama 3.3 70B, Qwen 2.5 | 50 RPD (free tier), 1,000 RPD ($10+ credits) | Up to 128k-1M tokens | Unified catalog for open-weight frontier models | Shared public capacity subject to queue latency |
+| Cloudflare Workers AI | Gemma, GLM, Nemotron, Llama 3.3 | 10,000 Neurons/day (~1,000 queries) | 8k-128k tokens | Native edge invocation without credential management | Lower context windows |
+| Vercel AI Gateway | Multi-provider catalog | $5/month recurring credits | Model dependent | Testing commercial models with monthly credit | Credit ends if account converts to paid |
 
 For a comprehensive catalog of always-free compute, storage, edge networks, and LLMs, consult [docs/FREE_TIERS.md](docs/FREE_TIERS.md).
 

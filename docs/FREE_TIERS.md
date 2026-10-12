@@ -1,6 +1,8 @@
 # Always-Free Cloud and LLM Tiers Reference
 
-This document catalogs permanent, always-free cloud infrastructure allowances and large language model (LLM) developer tiers. It distinguishes perpetual quotas from temporary 12-month promotional trials and documents operational constraints, idle policies, and failover patterns.
+This document catalogs permanent, always-free cloud infrastructure allowances and large language model (LLM) developer tiers. It distinguishes perpetual quotas from temporary promotional trials and documents operational constraints, idle policies, and failover patterns.
+
+Verified against provider documentation as of October 12, 2026.
 
 ## 1. Raw Compute and Virtual Machines (IaaS)
 
@@ -41,46 +43,66 @@ This document catalogs permanent, always-free cloud infrastructure allowances an
 - Northflank: Stands out as an always-on container host without the mandatory sleep timeouts enforced by platforms like Render. It is well-suited for lightweight persistent services like Uptime Kuma or Redis caches.
 - Fly.io Status: Fly.io discontinued its perpetual free tier for new accounts, restricting free access to short-term evaluation trials.
 
-## 4. Generous Cloud LLM Provider Tiers
+## 4. Free LLM API Access Models and Provider Comparison
 
-| Provider | Supported Free Models | Daily / Rate Allowance | Context Window | Primary Strength | Key Constraints |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| Google AI Studio | Gemini 2.5 / 3.8 Flash-Lite, Flash, Pro | Up to 1,000 RPD (Flash-Lite), 250-500 RPD (Flash), 50-100 RPD (Pro) | 1,000,000 tokens | Massive token context, multimodal inputs (audio, video, PDF). | Prompts and completions may be reviewed by human annotators to train Google models. |
-| Groq | Llama 3.3 70B, Llama 3.1 8B, Whisper-large-v3 | 14,400 RPD (8B), ~1,000 RPD (70B), ~30 RPM | 128,000 tokens | Low latency inference (250-300+ tokens/sec on 70B). | Enforces strict sliding per-minute token (TPM) limits. |
-| OpenRouter (:free) | DeepSeek R1, Llama 3.3 70B, Qwen 2.5 72B | ~20 RPM, ~200 RPD | Up to 128k-1M (model dependent) | Single endpoint for testing frontier open-weight models. | Shared community capacity can produce queue latency spikes. |
-| Cloudflare Workers AI | Llama 3.3 70B, Mistral 7B, DeepSeek R1 Distill | 10,000 Neurons/day (~1,000 lightweight queries) | 8,000-128,000 tokens | Zero credential setup inside Cloudflare Workers. | Lower context limits compared to dedicated model hosts. |
-| GitHub Models | GPT-4o, Claude 3.5 Sonnet, o3-mini, Llama 3.3 | 15 RPM, 150 RPD per model | Model defaults | Evaluation access to frontier closed and open models. | Intended for playground evaluation; not rated for production traffic. |
-| Mistral AI | Mistral Small, Codestral, Embeddings | ~1 RPS with monthly volume limits | 32,000-128,000 tokens | Structured JSON outputs and code completions. | Strict 1 RPS rate cap on the free tier. |
+Free API access divides across three distinct economic models:
 
-### Provider Mechanics and Quota Reset Profiles
+1. Permanent Free Tiers: Ongoing usage allowances that renew on daily or monthly schedules (such as Google Gemini, GroqCloud, and Cloudflare Workers AI).
+2. Recurring API Credits: A recurring dollar balance renewed monthly that can be spent across eligible models (such as Vercel AI Gateway providing $5/month, or Hugging Face providing $0.10/month).
+3. One-Time Trial Credits: Initial promotional balances valid for a limited window (such as Cerebras providing $5 for 30 days). These support initial evaluation but do not form sustainable free infrastructure.
 
-1. Google AI Studio:
-   - Quotas reset daily at 00:00 UTC.
-   - Flash-Lite: 15 RPM, 250,000 TPM, 1,000 RPD.
-   - Flash: 10 RPM, 250,000 TPM, 250-500 RPD.
-   - Pro: 5 RPM, 150,000-250,000 TPM, 50-100 RPD.
-   - Context window: 1,000,000 tokens allows routing entire codebases or long document batches in single prompts.
-   - Privacy boundary: Upgrading to Pay-As-You-Go disables model training on prompt data while preserving free or low-cost usage.
+### Free LLM API Comparison Matrix
 
-2. Groq:
-   - High-throughput LPU hardware achieves 250-300+ tokens/second on 70B models and over 800 tokens/second on 8B models.
-   - Sliding rate windows: Groq tracks rolling tokens-per-minute (TPM) and requests-per-minute (RPM). Exceeding rolling windows triggers immediate HTTP 429 status codes.
-   - Target use cases: Real-time agent loops, interactive terminal completions, and shell helpers.
+Verified against provider documentation as of October 12, 2026.
 
-3. OpenRouter (:free):
-   - Acts as a unified gateway for models with the `:free` suffix.
-   - Dynamic balancing via `openrouter/free` meta-model routes requests to available free capacity.
-   - Rate allowance: Approximately 20 requests per minute and 200 requests per day per user key.
+| Provider | Free API Allowance | Models and Capabilities | Best Suited For | Primary Constraints and Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| Google Gemini API | Free input/output tokens on eligible models; rate-limited | Gemini 2.5 / 3.8 Flash and Flash-Lite | General-purpose applications, 1M-token large context | Prompts submitted under the free tier may be reviewed by human annotators to train Google models. Consumer Google AI Pro subscriptions do not increase Developer API allowances. |
+| GroqCloud | Up to 1,000 requests/day, 30 RPM, 8,000 TPM, 200,000 TPD | GPT-OSS 120B/20B, Qwen, Llama 3.3 | Low-latency inference and real-time agent loops | Strict sliding per-minute token buckets (TPM) can throttle high-context coding requests before daily request limits bind. |
+| OpenRouter | 50 free requests/day (free tier); 1,000 requests/day ($10+ credits) | 25+ free models (DeepSeek R1, Llama 3.3 70B, Qwen 2.5) | Multi-provider model experimentation | Shared community endpoints can experience queue latency. Accounts with $10+ purchased credits expand daily free-model volume to 1,000 requests/day, but credits may expire after one year. |
+| Cloudflare Workers AI | 10,000 Neurons/day | Gemma, GLM, Nemotron, Llama 3.3, DeepSeek Distill | Serverless edge workflows and microservices | Neurons measure compute units rather than raw tokens. Context windows are typically smaller (8k to 128k). Certain resource-heavy models require paid plans. |
+| Vercel AI Gateway | $5/month in recurring credits | Eligible models from multi-provider catalog | Testing commercial and closed-source models | Covers only eligible models in Vercel catalog. Purchasing additional API credits converts the account to paid and terminates the recurring $5/month allowance. |
+| Mistral AI | Free API usage with account-specific limits | Mistral Small, Codestral, Embeddings | European hosting, structured JSON, code completion | Rate-limited to low requests per second (~1 RPS) on free tier. |
+| Hugging Face | $0.10/month in inference credits | Open-source models across various providers | Evaluating specific open checkpoints | Low monthly credit ceiling limits continuous agent loops. |
+| GitHub Models | 15 RPM, 150 RPD per model | GPT-4o, Claude 3.5 Sonnet, o3-mini, Llama 3.3 | Rapid prototyping on frontier models | Playground evaluation only; not rated for production traffic. |
+| Cerebras | $5 one-time trial credit, valid for 30 days | GPT-OSS 120B, Qwen | High-speed inference evaluation | One-time promotion that expires after 30 days rather than a recurring allowance. |
 
-4. Cloudflare Workers AI:
-   - Daily allocation of 10,000 Neurons resets at 00:00 UTC.
-   - Native execution inside Worker handlers without external API key management.
-   - Best for classification, summarization, and webhook pipelines.
+### Providers Without General Ongoing Free API Tiers
 
-## 5. Workload Selection Strategy
+- OpenAI: Operates no general recurring free API inference allowance. API billing is completely separate from ChatGPT consumer subscriptions (ChatGPT Plus or Team).
+- Anthropic: Operates primarily on prepaid API credits. While certain Claude Max and Team subscriptions include monthly credits for consumer chat, there is no general free API tier.
+- DeepSeek: Operates purely as a pay-per-token API without a general recurring free tier. Because pricing is very low, maintaining a small prepaid DeepSeek balance makes it an ideal safety fallback when free tiers are exhausted.
+- Consumer Subscriptions vs Developer APIs: A Google AI Pro / Gemini Advanced consumer subscription does not grant larger Gemini Developer API limits. API tiers maintain independent billing configurations, quotas, and terms of service.
+
+## 5. Connected Topics and Operational Blind Spots
+
+### Free-Tier Data Privacy
+Google's free Gemini API terms permit using submitted content to train Google models. Operators must avoid sending private source code, production credentials, or personal identifiable information (PII) through free developer endpoints without reviewing data retention terms. Upgrading Google AI Studio to Pay-As-You-Go disables training while maintaining low token costs.
+
+### Coding Agent Token Dynamics
+Coding agents (such as Aider, OpenCode, Claude Code, and PR-Agent) consume dramatically more tokens than conversational chat interfaces. Every interaction re-sends complete file trees, tool definitions, test outputs, and conversation context. As a result:
+- Restrictive tokens-per-minute (TPM) limits (such as Groq's 8,000 TPM) trigger HTTP 429 throttling long before generous daily request quotas (1,000 RPD) are exhausted.
+- Sliding token buckets require gateways like `shunt-shim` to inspect prompt byte sizes and divert large payloads (>100k tokens) to providers with high token-per-minute headroom (such as Google Gemini Flash).
+
+### Complementary Local Self-Hosting
+Hardware environments with bare-metal compute (such as home servers or local development workstations) can run local inference via Ollama or llama.cpp. Local models expose an OpenAI-compatible API endpoint with zero marginal token cost and complete data privacy, complementing cloud free tiers for repetitive small-context tasks.
+
+## 6. Workload Selection and Multi-Provider Routing Strategy
+
+| Architecture Role | Selected Provider | Rationale |
+| :--- | :--- | :--- |
+| Default Gateway Endpoint | Google Gemini API (free tier) | Multimodal ingestion, 1,000,000-token context window, stable daily reset schedule. |
+| Low-Latency Inference | GroqCloud | Sub-second LPU execution for interactive CLI completions, git commit generators, and short diffs. |
+| Model Diversity | OpenRouter (:free) | Single OpenAI-compatible endpoint multiplexing 25+ open-weight community models. |
+| Edge Native Pipelines | Cloudflare Workers AI | Co-located inference inside Cloudflare Workers alongside D1 SQL, KV, and R2 storage without managing API keys. |
+| Commercial Model Testing | Vercel AI Gateway | Monthly $5 credit allowance on eligible commercial models without upfront payment. |
+| Paid Emergency Fallback | DeepSeek API | Cost-effective token balance reserved as a last-resort fallback when all free-tier quotas are exhausted. |
+| Self-Hosted Fallback | Local Ollama / llama.cpp | Zero-cost loopback inference on local bare-metal hardware for non-rate-limited offline testing. |
+
+### Infrastructure Deployment Guidance
 
 - Self-hosting heavy services, Docker workloads, or VPN hubs: Deploy to Oracle Cloud (OCI) Ampere A1 (up to 12 GB RAM, 10 TB egress). Convert to PAYG to eliminate idle reaping.
 - Edge routing, API gateways, static frontends, and backups: Deploy to Cloudflare (Workers, Pages, R2, D1) for zero egress fees and always-on edge availability.
 - Persistent lightweight containers: Deploy to Northflank Sandbox (always-on, no idle sleep).
 - Out-of-band monitoring and network pingers: Deploy to GCP e2-micro, restricting outbound data to under 1 GB per month.
-- Aggregated LLM inference: Deploy shunt-shim to a Cloudflare Worker to multiplex Google AI Studio, Groq, and OpenRouter behind an OpenAI-compatible endpoint.
+- Aggregated LLM routing: Deploy `shunt-shim` to Cloudflare Workers to coordinate free allowances, enforce sliding rate-limit circuit breaking, and fall back to DeepSeek when quotas deplete.
