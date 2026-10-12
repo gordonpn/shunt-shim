@@ -60,6 +60,10 @@ if echo "$output" | grep -q "GEMINI_API_KEY"; then
   echo "Unexpected diagnostic for GEMINI_API_KEY when provided" >&2
   exit 1
 fi
+if echo "$output" | grep -E -q "dummy-gemini|dummy-groq"; then
+  echo "Leaked provided credentials in failure output" >&2
+  exit 1
+fi
 
 # 2b. GEMINI_API_KEY missing
 set +e
@@ -75,6 +79,10 @@ if [ "$status" -eq 0 ]; then
 fi
 if ! echo "$output" | grep -q "Missing required environment variable: GEMINI_API_KEY"; then
   echo "Expected diagnostic for GEMINI_API_KEY missing" >&2
+  exit 1
+fi
+if echo "$output" | grep -E -q "dummy-token|dummy-groq"; then
+  echo "Leaked provided credentials in failure output" >&2
   exit 1
 fi
 
@@ -94,8 +102,13 @@ if ! echo "$output" | grep -q "Missing required environment variable: GROQ_API_K
   echo "Expected diagnostic for GROQ_API_KEY missing" >&2
   exit 1
 fi
+if echo "$output" | grep -E -q "dummy-token|dummy-gemini"; then
+  echo "Leaked provided credentials in failure output" >&2
+  exit 1
+fi
 
 # 3. Empty string variable values fail validation
+# 3a. Empty GATEWAY_TOKENS
 set +e
 output=$(env -i PATH="$PATH" HOME="$HOME" \
   GATEWAY_TOKENS="" \
@@ -110,6 +123,54 @@ if [ "$status" -eq 0 ]; then
 fi
 if ! echo "$output" | grep -q "Missing required environment variable: GATEWAY_TOKENS"; then
   echo "Expected diagnostic for empty GATEWAY_TOKENS" >&2
+  exit 1
+fi
+if echo "$output" | grep -E -q "dummy-gemini|dummy-groq"; then
+  echo "Leaked provided credentials in failure output" >&2
+  exit 1
+fi
+
+# 3b. Empty GEMINI_API_KEY
+set +e
+output=$(env -i PATH="$PATH" HOME="$HOME" \
+  GATEWAY_TOKENS="dummy-token" \
+  GEMINI_API_KEY="" \
+  GROQ_API_KEY="dummy-groq" \
+  just --justfile "$TMP_DIR/Justfile" --working-directory "$TMP_DIR" check-secrets 2>&1)
+status=$?
+set -e
+if [ "$status" -eq 0 ]; then
+  echo "Expected check-secrets to fail when GEMINI_API_KEY is empty" >&2
+  exit 1
+fi
+if ! echo "$output" | grep -q "Missing required environment variable: GEMINI_API_KEY"; then
+  echo "Expected diagnostic for empty GEMINI_API_KEY" >&2
+  exit 1
+fi
+if echo "$output" | grep -E -q "dummy-token|dummy-groq"; then
+  echo "Leaked provided credentials in failure output" >&2
+  exit 1
+fi
+
+# 3c. Empty GROQ_API_KEY
+set +e
+output=$(env -i PATH="$PATH" HOME="$HOME" \
+  GATEWAY_TOKENS="dummy-token" \
+  GEMINI_API_KEY="dummy-gemini" \
+  GROQ_API_KEY="" \
+  just --justfile "$TMP_DIR/Justfile" --working-directory "$TMP_DIR" check-secrets 2>&1)
+status=$?
+set -e
+if [ "$status" -eq 0 ]; then
+  echo "Expected check-secrets to fail when GROQ_API_KEY is empty" >&2
+  exit 1
+fi
+if ! echo "$output" | grep -q "Missing required environment variable: GROQ_API_KEY"; then
+  echo "Expected diagnostic for empty GROQ_API_KEY" >&2
+  exit 1
+fi
+if echo "$output" | grep -E -q "dummy-token|dummy-gemini"; then
+  echo "Leaked provided credentials in failure output" >&2
   exit 1
 fi
 
