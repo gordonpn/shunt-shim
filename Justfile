@@ -1,5 +1,8 @@
 # shunt-shim project task runner
 
+set dotenv-load
+set dotenv-filename := ".dev.vars"
+
 default:
     @just --list
 
@@ -28,6 +31,10 @@ tail:
 # Validate environment secrets
 check-secrets:
     @status=0; \
+    if [ -z "${GATEWAY_TOKENS:-}" ]; then \
+        echo "Missing required environment variable: GATEWAY_TOKENS" >&2; \
+        status=1; \
+    fi; \
     if [ -z "${GEMINI_API_KEY:-}" ]; then \
         echo "Missing required environment variable: GEMINI_API_KEY" >&2; \
         status=1; \
@@ -38,8 +45,12 @@ check-secrets:
     fi; \
     exit $status
 
+# Verify secret check behavior against edge cases
+test-secrets:
+    bash .github/scripts/test-check-secrets.sh
+
 # Validate repository automation without application code or secrets
-check-workflows: lint-workflows
+check-workflows: lint-workflows test-secrets
     shellcheck .github/scripts/*.sh
     git diff --check $(git hash-object -t tree /dev/null)
     git diff --cached --check
