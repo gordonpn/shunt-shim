@@ -67,7 +67,13 @@ jobs:
           version: 2026.10.3
       - name: Install dependencies
         run: just install-ci
+      - name: Check formatting
+        run: just check-format
+      - name: Lint
+        run: just lint
       - name: Typecheck
         run: just typecheck
       - name: Run unit tests
         run: just test
+      - name: Build
+        run: just build

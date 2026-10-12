@@ -17,16 +17,32 @@ review-docs:
     ocr delegate rule --format json Justfile README.md docs/MVP.md docs/COMPATIBILITY.md docs/ARCHITECTURE.md docs/CONFIGURATION.md docs/RUNBOOK.md docs/adr/*.md docs/GROQ_CAPABILITY.md docs/GEMINI_CAPABILITY.md
 
 # Start local edge development server using wrangler
-dev:
-    bunx wrangler dev
+dev *args:
+    pnpm exec wrangler dev {{ args }}
+
+# Build edge worker bundle for deployment verification
+build:
+    pnpm run build
+
+# Format source files using Biome
+format:
+    pnpm run format
+
+# Check formatting without modifying files
+check-format:
+    pnpm run format:check
+
+# Lint source files using Biome
+lint:
+    pnpm run lint
 
 # Deploy edge worker to Cloudflare
 deploy:
-    bunx wrangler deploy
+    pnpm exec wrangler deploy
 
 # Inspect real-time edge runtime logs
 tail:
-    bunx wrangler tail
+    pnpm exec wrangler tail
 
 # Validate environment secrets
 check-secrets:
@@ -77,3 +93,8 @@ review-biome:
 review-workflows:
     ocr delegate preview --format json
     ocr delegate rule --format json .github/workflows/*.yml .github/scripts/*.sh Justfile mise.toml README.md docs/AUTOMATION.md .pr_agent.toml
+
+# Resolve deterministic OCR coverage and review rules for source code
+review-code:
+    ocr delegate preview --format json
+    ocr delegate rule --format json package.json tsconfig.json biome.json wrangler.jsonc vitest.config.ts src/*.ts test/*.ts

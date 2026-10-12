@@ -55,8 +55,8 @@ Free-tier providers enforce account-level constraints shared by all clients. A c
 ### Distributed Ingress Without Private Mesh Overlays
 Developer environments span laptops, local workstations, remote servers, and CI/CD pipelines. A local daemon on a laptop becomes unavailable the moment the laptop lid closes or disconnects from Wi-Fi. Running a daemon on a private home server requires remote clients to connect through Tailscale, SSH tunnels, or VPN configurations. A Cloudflare Worker exposes a public HTTPS endpoint (`https://api.yourdomain.com/v1`) accessible securely from any environment without mesh infrastructure.
 
-### Multi-Tenant Virtual Tokens and Priority Degradation
-An edge worker inspects custom bearer tokens (such as `sk-proj-aider` or `sk-proj-webhook`) to partition usage. When available quotas drop below defined thresholds (such as 10% daily quota remaining), the worker can degrade or pause non-critical background jobs while reserving remaining capacity for interactive coding sessions.
+### Multi-Tenant Virtual Tokens and Priority Degradation (Deferred)
+In extended proposals beyond the MVP, an edge worker could inspect custom bearer tokens (such as `sk-proj-aider` or `sk-proj-webhook`) to partition usage and prioritize interactive traffic. The MVP defers multi-tenant tokens and accepts only one random gateway secret.
 
 ### Zero Host Maintenance
 Cloudflare Workers run in V8 isolates with sub-millisecond cold starts, zero idle resource consumption, and no operating system dependencies or systemd daemons to maintain. Cloudflare's free tier provides 100,000 requests per day, which comfortably exceeds the combined daily allocations of upstream free model providers.

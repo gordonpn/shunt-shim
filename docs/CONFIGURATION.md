@@ -1,14 +1,14 @@
 # Configuration Reference
 
-This document describes proposed configuration schemas, environment variables, edge secrets, and virtual aliases for `shunt-shim`. No gateway configuration is implemented yet. The broader alias and priority proposals below are deferred beyond the [MVP](MVP.md); no KV binding or quota-accounting configuration is required for the MVP.
+This document describes configuration schemas, environment variables, edge secrets, and virtual aliases for `shunt-shim`. The Worker service is implemented under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md). The broader alias and multi-tenant priority proposals below are deferred beyond the [MVP](MVP.md); no KV binding or quota-accounting configuration is required for the MVP.
 
 ## MVP configuration constraints
 
 The [client settings and canonical contract](COMPATIBILITY.md) take precedence over
 the broader examples below. Configure one random gateway secret, one fast alias,
 Groq primary and Gemini fallback with fixed endpoints and account-verified models.
-The existing GATEWAY_TOKENS example must contain only that one secret for the MVP;
-its plural name does not imply tenant support. Reject direct provider model names.
+The GATEWAY_TOKENS secret contains only that one secret for the MVP; its plural name
+does not imply tenant support. Direct provider model names are rejected.
 Accept either Bearer or x-api-key against the same secret and reject conflicting
 headers. Provider keys are independent and never sent to clients.
 
@@ -16,8 +16,8 @@ Select and document body limits, core parameter bounds, approved extension mappi
 connect/total deadlines, and the shared context/output limits. The total deadline
 covers both attempts, fits client timeouts, and remains below ingress timeouts.
 No paid substitution, second fallback, context router, or reasoning guarantee is
-enabled by the illustrative configuration. PR-Agent needs an explicit shared
-context limit and gateway-only model settings.
+enabled by the MVP configuration. PR-Agent needs an explicit shared context limit
+and gateway-only model settings.
 
 ## 1. Edge Secrets and Environment Variables
 
@@ -27,17 +27,17 @@ Upstream API keys and edge runtime configurations are managed via Cloudflare Wor
 | :--- | :--- | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | Secret | API key for Google AI Studio | Yes | `AIzaSy...` |
 | `GROQ_API_KEY` | Secret | API key for Groq Cloud | Yes | `gsk_...` |
-| `OPENROUTER_API_KEY` | Secret | API key for OpenRouter (deferred beyond MVP) | Optional | `sk-or-v1-...` |
 | `GATEWAY_TOKENS` | Secret | Gateway authentication secret (single secret for MVP) | Yes | `<one-random-gateway-secret>` |
+| `OPENROUTER_API_KEY` | Secret | API key for OpenRouter (deferred beyond MVP) | No | `sk-or-v1-...` |
 | `GATEWAY_ENV` | Variable | Runtime environment identifier | No | `production` (default: `development`) |
-| `CONTEXT_ROUTER_THRESHOLD` | Variable | Estimated token count that forces large-context routing | No | `100000` (default: `100000`) |
+| `CONTEXT_ROUTER_THRESHOLD` | Variable | Estimated token count that forces large-context routing (deferred beyond MVP) | No | `100000` |
 
 ### Secret Management Commands
 Secrets must never be committed to source control. Set secrets in production using Wrangler:
 ```bash
-bunx wrangler secret put GEMINI_API_KEY
-bunx wrangler secret put GROQ_API_KEY
-bunx wrangler secret put GATEWAY_TOKENS
+pnpm exec wrangler secret put GEMINI_API_KEY
+pnpm exec wrangler secret put GROQ_API_KEY
+pnpm exec wrangler secret put GATEWAY_TOKENS
 ```
 
 For local development, copy `.env.example` to `.dev.vars` (which is excluded by `.gitignore`):
@@ -47,18 +47,19 @@ cp .env.example .dev.vars
 
 ## 2. Wrangler Configuration (`wrangler.jsonc`)
 
-The following illustrative sample assumes a TypeScript Worker deployment. It is not a shipped configuration and does not provision quota storage:
+The implemented Worker deployment configuration:
 
 ```jsonc
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "shunt-shim",
   "main": "src/index.ts",
-  "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
-  "vars": {
-    "GATEWAY_ENV": "production",
-    "CONTEXT_ROUTER_THRESHOLD": "100000"
+  "compatibility_date": "2026-03-01",
+  "compatibility_flags": [
+    "enable_request_signal"
+  ],
+  "observability": {
+    "enabled": true
   }
 }
 ```
@@ -80,9 +81,10 @@ an unknown alias returns HTTP 404 without an upstream call. `qwen/qwen3.8-27b` i
 as the primary model because it reliably supports all four `tool_choice` variants
 (`auto`, `required`, named, and `none`) without upstream failure.
 
-## 4. Multi-Tenant Project Tokens and Priority Levels
+## 4. Deferred Multi-Tenant Project Tokens and Priority Levels
 
-Tokens passed in the HTTP `Authorization: Bearer <token>` header partition usage and assign execution priority:
+The MVP accepts only one random bearer-token secret configured via `GATEWAY_TOKENS`.
+Multi-tenant partitioning and priority levels are deferred beyond the MVP:
 
 | Token Identifier | Priority Tier | Behavior During Low Quota (<10% Remaining) |
 | :--- | :--- | :--- |
