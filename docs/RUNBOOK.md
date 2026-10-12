@@ -34,11 +34,15 @@ Ensure active developer accounts and API keys from upstream providers:
    ```ini
    GEMINI_API_KEY="AIzaSy..."
    GROQ_API_KEY="gsk_..."
-   OPENROUTER_API_KEY="sk-or-v1-..."
    GATEWAY_TOKENS="<one-random-gateway-secret>"
    ```
 
-3. Start the local worker emulator:
+3. Validate required environment secrets:
+   ```bash
+   just check-secrets
+   ```
+
+4. Start the local worker emulator:
    ```bash
    just dev
    ```
@@ -56,7 +60,6 @@ Store credentials securely in Cloudflare:
 ```bash
 bunx wrangler secret put GEMINI_API_KEY
 bunx wrangler secret put GROQ_API_KEY
-bunx wrangler secret put OPENROUTER_API_KEY
 bunx wrangler secret put GATEWAY_TOKENS
 ```
 
