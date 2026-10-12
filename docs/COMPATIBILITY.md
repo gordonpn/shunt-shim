@@ -50,8 +50,11 @@ authentication headers elsewhere in the client do not prove OpenAI-mode support.
 - Support optional finite temperature in the verified shared range and positive
   integer output limits. Accept both
   `max_tokens` and `max_completion_tokens`; the latter wins when both are valid.
-  Validate both supplied values and map one limit to each upstream's supported
-  field. Document model-specific bounds after account verification.
+  Validate both supplied values and map exactly one winning limit to each upstream's supported
+  field. Account verification confirms Gemini rejects requests containing both fields with
+  HTTP 400 (`max_tokens and max_completion_tokens cannot both be set`), making dispatch
+  normalization to a single parameter mandatory.
+  See [Groq verification report](GROQ_CAPABILITY.md) and [Gemini verification report](GEMINI_CAPABILITY.md).
 - `stream` defaults to false and must be boolean. Accept
   `stream_options.include_usage` as boolean for streaming; reject non-null
   stream options when streaming is false. Omitted/null optional options use
@@ -71,7 +74,7 @@ Native Anthropic/Gemini adapters and a general provider IR are deferred.
 | Parameter / Bound | Value | Units | Enforcement Behavior |
 | :--- | :--- | :--- | :--- |
 | Inbound Request Body Limit | 10,485,760 | bytes (10 MB) | Immediate HTTP 413 `payload_too_large` response prior to JSON parse; zero upstream dispatch. On the Workers Free plan (10 ms CPU limit), parsing near-limit payloads will be benchmarked; streaming parsing or payload ceiling calibration applies if parsing approaches CPU budget. |
-| Shared Context Window Ceiling | 128,000 | tokens | Combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq Llama-3.3-70b-versatile context. PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` prior to upstream dispatch. |
+| Shared Context Window Ceiling | 128,000 | tokens | Combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq context on verified models (`openai/gpt-oss-120b`, `qwen/qwen3.8-27b`). PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` prior to upstream dispatch. |
 | Max Output Tokens Bound | 8,192 | tokens | Accepted in `max_tokens` or `max_completion_tokens`. Both Groq and Gemini support up to 8,192 completion tokens. |
 | Upstream Connect Timeout | 5,000 | ms (5s) | Per-attempt connection deadline. Connection failure or reaching the 5s connect deadline on Attempt 1 triggers eligible fallback before response commitment. |
 | Upstream Attempt Timeout | 60,000 | ms (60s) | Per-attempt execution deadline. Attempt 1 reaching 60s without committing response headers triggers eligible fallback if remaining gateway deadline permits; Attempt 2 reaching 60s triggers HTTP 504 `gateway_timeout`. |

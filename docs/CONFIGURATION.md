@@ -71,7 +71,7 @@ Client applications should query virtual aliases rather than hardcoded provider 
 
 | Virtual Alias | Primary Provider and Model | First Fallback | Second Fallback | Target Use Case |
 | :--- | :--- | :--- | :--- | :--- |
-| `fast` | Groq (`llama-3.3-70b-versatile`) | Google AI Studio (`gemini-2.5-flash-lite`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Low-latency chat, terminal completions, interactive CLI |
+| `fast` | Groq (`qwen/qwen3.8-27b` or `openai/gpt-oss-120b`) | Google AI Studio (`gemini-2.5-flash-lite`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Low-latency chat, terminal completions, interactive CLI |
 | `deep` | Google AI Studio (`gemini-2.5-flash`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Google AI Studio (`gemini-2.5-flash-lite`) | Large file analysis, repository context, document summarization |
 | `reasoning` | OpenRouter (`deepseek/deepseek-r1:free`) | Google AI Studio (`gemini-2.5-pro`) | Groq (`llama-3.3-70b-versatile`) | Architectural planning, complex debugging, code generation |
 
