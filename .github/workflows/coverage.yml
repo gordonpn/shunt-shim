@@ -58,7 +58,7 @@ jobs:
       - name: Setup LCOV
         uses: hrishikesh-kadam/setup-lcov@6c1aa0cc9e1c02f9f58f01ac599f1064ccc83470 # v1
       - name: Configure LCOV
-        run: echo "ignore_errors = inconsistent, corrupt" >> ~/.lcovrc
+        run: echo "ignore_errors = inconsistent" >> ~/.lcovrc
       - name: Install dependencies
         run: just install-ci
       - name: Run tests with coverage
