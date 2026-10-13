@@ -65,9 +65,10 @@ authentication headers elsewhere in the client do not prove OpenAI-mode support.
   cannot override model, endpoint, auth, or validated core fields. Ignoring a
   reasoning hint does not promise reasoning support or disable upstream thinking.
 
-Use the two upstreams' OpenAI-compatible endpoints and a small validated request
+Use Groq's native OpenAI-compatible endpoint and Google Gemini's native Google REST
+API via a dedicated bidirectional translation adapter, with a small validated request
 representation. Normalize output limits and approved extensions at dispatch.
-Native Anthropic/Gemini adapters and a general provider IR are deferred.
+Native Anthropic adapters and a general provider IR are deferred.
 
 ### Shared request bounds
 
@@ -188,5 +189,6 @@ the deployed gateway; test streaming via supported client modes and fixtures.
 Repeat OpenCodeReview's tool cycle with a controlled eligible primary failure.
 Record sanitized revisions, settings, request IDs, results, and commands under
 `docs/`. A contract fixture or successful text response alone is not proof that
-all three real clients work. Paid routing, cost accounting, and circuit breakers
-remain outside the MVP.
+all three real clients work. Paid routing, cost accounting, and cross-instance
+circuit-breaker coordination remain outside the MVP (isolate-local circuit breakers
+with bounded cooldown govern per-isolate failover).

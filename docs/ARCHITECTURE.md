@@ -7,8 +7,9 @@ Status: broader design proposal, not implemented. See [MVP scope](MVP.md) for th
 The [compatibility contract](COMPATIBILITY.md) governs the MVP: DeepSeek Review,
 OpenCodeReview, and PR-Agent enter through one handler with two completion paths.
 Authenticate one secret via Bearer or x-api-key, validate core fields, retain
-extensions, map approved parameters, and dispatch to Groq or Gemini's compatible
-endpoint. Normalize JSON metadata and relay SSE/tool/usage events with cancellation.
+extensions, map approved parameters, and dispatch to Groq's OpenAI-compatible
+endpoint or Gemini's native Google REST API via a dedicated bidirectional translation
+adapter. Normalize JSON metadata and relay SSE/tool/usage events with cancellation.
 The topology and tenant/context proposals below are deferred design alternatives.
 
 ## 1. System Overview
@@ -113,13 +114,22 @@ Clients request semantic aliases instead of brittle provider-specific model stri
 The gateway applies an Adaptive Capability Matrix bounded by Dynamic Circuit Breakers
 (see [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md)). Candidate models are
 filtered by requested capabilities (tools, JSON response format, context ceiling) before evaluating
-health state. In isolate-local memory, endpoints track `Healthy`, `Open` (cooling down), and `Half-Open`
-(canary test) states. If the primary provider returns HTTP 429, HTTP 503, or a connection timeout before
-response commitment, the circuit breaker trips for the normalized cooldown window and execution cascades
-to the next eligible healthy candidate (Gemini). Do not replay a request once streaming starts or conceal
-validation and credential errors behind fallback. If no eligible provider succeeds, return an explicit error.
-In extended post-MVP routing, exhausting free-tier candidates can optionally trigger a final fallback to a
-paid DeepSeek account balance before returning an error to the client.
+health state (in MVP, context filtering validates against the shared 128k context ceiling using the
+conservative token density heuristic). In isolate-local memory, endpoints track `Healthy`, `Open`
+(cooling down), and `Half-Open` (canary test) states. Eligible fallback triggers before downstream response
+commitment are strictly: HTTP 429, HTTP 503, connect failure / 5s connect timeout, and 60s Attempt 1
+execution timeout (if remaining total gateway deadline permits). HTTP 500, 502, and non-retryable 4xx
+errors are ineligible. If an eligible failure occurs, the primary circuit trips for the normalized
+cooldown window (or bounded exponential backoff with jitter if headers are absent) and execution cascades
+to the next eligible healthy candidate (Gemini). During concurrent failure bursts, cascading requests
+evaluate the fallback endpoint's health and rate limits; if the fallback is also tripped, the gateway
+returns the primary error immediately rather than flooding the backup. If Attempt 1 times out at 60s,
+the upstream fetch aborts immediately via linked abort signals; any uncancelled inference accepted
+upstream before abort propagation is recognized as an accepted trade-off to deliver client completions.
+Do not replay a request once streaming starts or conceal validation and credential errors behind fallback.
+If no eligible provider succeeds, return an explicit error. In extended post-MVP routing, exhausting
+free-tier candidates can optionally trigger a final fallback to a paid DeepSeek account balance before
+returning an error to the client.
 
 ### Stage 5: Protocol Normalization
 Groq uses native OpenAI-compatible pass-through. Google Gemini uses a dedicated bidirectional adapter
@@ -147,18 +157,35 @@ Providers remain the source of truth for their account-specific limits:
 
 ### Circuit Breaker State Management
 Initial iterations implement best-effort isolate-local circuit breakers with timestamp-based single-probe
-canary gates (see [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md)). Rate limit
-headers (`Retry-After`, `x-ratelimit-reset-requests`, `x-ratelimit-reset-tokens`) are normalized into a unified
-`cooldown_until` timestamp. Distributed KV or Durable Object state management is evaluated as a post-MVP
-evolutionary path.
+canary gates (see [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md)). Cooldown
+timestamps are stored in epoch milliseconds (`cooldown_until: number`). In the `Half-Open` state, when
+`cooldown_until <= Date.now()`, the first arriving request atomically claims the probe slot (`probing = true`).
+Concurrent requests arriving while a probe is in flight observe `probing === true` and treat the circuit
+as `Open`, bypassing directly to fallback. Circuit transitions track an integer `generation` counter so
+that only a probe matching the active generation can transition the circuit to `Healthy` and clear `probing`;
+earlier in-flight successes cannot clear a newer cooldown opened by a subsequent request. If the canary probe
+fails, the circuit returns to `Open`, calculates an incremented backoff cooldown, and clears `probing`.
+Rate limit headers (`Retry-After`, `x-ratelimit-reset-requests`, `x-ratelimit-reset-tokens`) are normalized
+into a unified `cooldown_until` timestamp in epoch milliseconds by taking the latest (maximum) reported
+reset deadline. For HTTP 429 without headers, HTTP 503, connect timeouts, and execution timeouts, bounded
+exponential backoff with jitter (`min(300, 2^attempt * 5) +/- jitter` in seconds, stored as epoch milliseconds)
+is enforced. Distributed KV or Durable Object state management is evaluated as a post-MVP evolutionary path.
 
 ## 5. Schema Normalization Details
 
 ### Provider Adaptation
 - **Groq**: Direct OpenAI Chat Completions REST API pass-through with field validation.
 - **Google Gemini**: Dedicated bidirectional translation adapter converting OpenAI request bodies into
-  native Google REST content objects (`contents`, `generationConfig`, `tools`, and `functionDeclarations`), and
-  streaming response chunks back into OpenAI-compatible SSE events.
+  native Google REST content objects (`contents`, `generationConfig`, `tools`, `functionDeclarations`,
+  `systemInstruction`, and `toolConfig.functionCallingConfig`), and streaming response chunks back into
+  OpenAI-compatible SSE events.
+  - **System Instructions**: OpenAI messages with role `system` do not map to `contents` (which accepts only
+    `user` and `model` roles), but map directly to Gemini's top-level `systemInstruction` field
+    (`{ parts: [{ text: ... }] }`).
+  - **Tool Choice Mapping**: Translate OpenAI `tool_choice` into Gemini's `toolConfig.functionCallingConfig`:
+    `"auto"` maps to `mode: "AUTO"`; `"none"` maps to `mode: "NONE"`; `"required"` maps to `mode: "ANY"`;
+    and named tool choices (`{"type": "function", "function": {"name": "xyz"}}`) map to `mode: "ANY"` with
+    `allowedFunctionNames: ["xyz"]`. Omitted or default `tool_choice` maps to `mode: "AUTO"`.
 Map `max_tokens`/`max_completion_tokens` to the selected upstream's verified output-limit field. Extension
 mappings are explicit per provider; unknown extras are ignored without overriding model, auth, or endpoint.
 Preserve tool history and provider-required tool metadata through approved mappings. Anthropic adapters

@@ -45,21 +45,25 @@ upstream validation or credential failures behind a fallback. If all candidates
 are rate-limited, return an OpenAI-style HTTP 429 error; upstream unavailability
 must remain distinguishable from quota exhaustion.
 
-Use both providers' OpenAI-compatible endpoints initially:
+Provider endpoint selection follows [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md):
 
-- [Groq chat completions](https://console.groq.com/docs/api-reference).
-- [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai),
-  including streaming and function calling.
+- [Groq chat completions](https://console.groq.com/docs/api-reference):
+  native OpenAI-compatible REST API pass-through with field validation.
+- [Google Gemini REST API](https://ai.google.dev/api/generate-content):
+  native Google REST API (`:generateContent` and `:streamGenerateContent?alt=sse`)
+  via a dedicated bidirectional translation adapter.
 
-This avoids a native Gemini request adapter and custom SSE translator. Verify
+Using Gemini's native Google REST API grants direct control over safety settings,
+generation configurations, system instruction placement, and tool calling schemas,
+avoiding the impedance mismatch of third-party OpenAI emulation layers. Verify
 the actual client and model behavior before claiming compatibility. Preserve
 streamed tool-call fields and finish reasons, not just text deltas.
 
 ## Deferred
 
-- Proactive quota prediction, shared counters, and circuit-breaker state.
+- Proactive quota prediction, shared counters, and cross-instance circuit-breaker coordination.
 - Tenant priorities, per-project accounting, and reserved capacity.
-- Token estimation and automatic large-context routing.
+- Exact token accounting and automatic large-context routing across multi-tier pools.
 - The `deep` and `reasoning` aliases.
 - OpenRouter and Workers AI.
 - Multimodal inputs, embeddings, and the Responses API.
