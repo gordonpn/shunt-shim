@@ -1,8 +1,9 @@
 # MVP Scope and Deployment Options
 
-Status: runtime and request bounds agreed, not implemented. The runtime and
+Status: runtime, request bounds, and fallback strategy agreed, not implemented. The runtime and
 deployment target is agreed as Cloudflare Workers (TypeScript / Hono).
-See [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
+See [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md) and
+[ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md).
 
 The other architecture, configuration, and runbook documents describe the broader
 design. Their commands and capabilities are not evidence of a working gateway.

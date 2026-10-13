@@ -14,10 +14,12 @@ The topology and tenant/context proposals below are deferred design alternatives
 ## 1. System Overview
 
 The MVP presents an OpenAI Chat Completions HTTP interface to three review clients
-and dispatches through compatible Groq/Gemini endpoints. The runtime and deployment
-target is agreed as Cloudflare Workers (TypeScript / Hono)
-(see [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md)); the extended
-tenant/context pipeline later in this document is deferred. In extended architectures
+and dispatches through Groq (OpenAI-compatible REST API) and Google Gemini (native Google REST API).
+The runtime and deployment target is agreed as Cloudflare Workers (TypeScript / Hono)
+(see [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md)). The model fallback architecture
+and provider adaptation strategy are agreed as an Adaptive Capability Matrix with Dynamic Circuit
+Breakers and native Google REST adaptation (see [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md));
+the extended tenant/context pipeline later in this document is deferred. In extended architectures
 beyond the zero-cost MVP, exhausting free allowances can optionally route to a funded
 DeepSeek API balance as an emergency safety net to prevent workflow interruption.
 
@@ -28,20 +30,20 @@ DeepSeek API balance as an emergency safety net to prevent workflow interruption
                                | OpenAI HTTP JSON / SSE
                                v
 +-------------------------------------------------------------+
-|                Gateway on one selected platform             |
+|              Cloudflare Worker (Hono Router)                |
 |                                                             |
 |  * /v1/models (Virtual alias catalog)                       |
-|  * /v1/chat/completions (Request adapter and SSE streaming) |
-|  * /chat/completions (Same handler)                          |
-|  * One secret via Bearer or x-api-key                        |
-|  * One fast alias, bounded fallback, cancellation            |
+|  * /v1/chat/completions (Request adapter & SSE streaming)   |
+|  * /chat/completions (Same handler)                         |
+|  * Secret verification via Bearer or x-api-key              |
+|  * One fast alias, circuit breaker, bounded fallback        |
 +---------------+-----------------------------+---------------+
                 |                             |
-          OpenAI HTTP / SSE                   | OpenAI HTTP / SSE
+          OpenAI HTTP / SSE           Native Google REST / SSE
                 v                             v
 +-------------------------------+ +---------------------------+
-|       Google AI Studio        | |           Groq            |
-| (Verified free-tier model)    | | (Verified free-tier model) |
+|             Groq              | |     Google AI Studio      |
+| (Verified free-tier model)    | | (Verified free-tier model)|
 +-------------------------------+ +---------------------------+
 ```
 
@@ -107,38 +109,57 @@ Clients request semantic aliases instead of brittle provider-specific model stri
 - `deep`: High-context analysis and long documents (default: Google Gemini Flash; fallback: OpenRouter :free).
 - `reasoning`: Complex logic and code generation (default: OpenRouter DeepSeek R1 :free; fallback: Google Gemini Pro).
 
-### Stage 4: Waterfall Fallback Execution
-If the primary provider returns HTTP 429 (rate limited), HTTP 503 (service unavailable), or a connection timeout before response commitment, the MVP attempts its one eligible fallback. Do not replay a request once streaming starts or conceal validation and credential errors behind fallback. If no eligible provider succeeds, return an explicit error; there is no pre-flight quota check. In extended post-MVP routing, exhausting free-tier candidates can optionally trigger a final fallback to a paid DeepSeek account balance before returning an error to the client.
+### Stage 4: Waterfall Fallback and Circuit Breaker Execution
+The gateway applies an Adaptive Capability Matrix bounded by Dynamic Circuit Breakers
+(see [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md)). Candidate models are
+filtered by requested capabilities (tools, JSON response format, context ceiling) before evaluating
+health state. In isolate-local memory, endpoints track `Healthy`, `Open` (cooling down), and `Half-Open`
+(canary test) states. If the primary provider returns HTTP 429, HTTP 503, or a connection timeout before
+response commitment, the circuit breaker trips for the normalized cooldown window and execution cascades
+to the next eligible healthy candidate (Gemini). Do not replay a request once streaming starts or conceal
+validation and credential errors behind fallback. If no eligible provider succeeds, return an explicit error.
+In extended post-MVP routing, exhausting free-tier candidates can optionally trigger a final fallback to a
+paid DeepSeek account balance before returning an error to the client.
 
 ### Stage 5: Protocol Normalization
-Both MVP upstreams expose OpenAI-compatible endpoints. Preserve completion IDs,
-string text, tool IDs and JSON-string arguments, finish reasons, usage, and optional
-reasoning metadata. Relay incremental SSE including indexed tool deltas and final
-usage events. Never append a successful terminator to an incomplete upstream stream.
+Groq uses native OpenAI-compatible pass-through. Google Gemini uses a dedicated bidirectional adapter
+translating between OpenAI Chat Completions payloads and the native Google REST API (`:generateContent` and
+`:streamGenerateContent?alt=sse`). Preserve completion IDs, string text, tool IDs and JSON-string arguments,
+finish reasons, usage, and optional reasoning metadata. Relay incremental SSE including indexed tool deltas
+and final usage events. Never append a successful terminator to an incomplete upstream stream.
 
 ### Deferred Accounting
-The MVP does not maintain provider daily counters, minute counters, or project usage counters. Do not provision KV for quota enforcement. If strict coordination is later required, design atomic quota reservations and updates through a coordinating Durable Object; this is not part of the current request pipeline.
+The MVP does not maintain provider daily counters, minute counters, or project usage counters. Do not
+provision KV for quota enforcement. Best-effort isolate-local memory provides zero-latency cooldown tracking
+for initial iterations. If strict cross-instance coordination is later required, evaluate Cloudflare KV or
+coordinating Durable Objects; this is not part of the initial request pipeline.
 
 ## 4. Upstream Quota Enforcement
 
 Providers remain the source of truth for their account-specific limits:
 
-| Provider | Quota Type | MVP Strategy |
+| Provider | Quota Type | Strategy |
 | :--- | :--- | :--- |
-| Google AI Studio | Account- and model-specific request and token limits | Handle upstream HTTP 429; return an explicit error if no eligible provider succeeds |
-| Groq | Account- and model-specific rolling request and token limits | Attempt the Gemini fallback on upstream HTTP 429 before response commitment |
+| Google AI Studio | Account- and model-specific request and token limits | Native REST adapter; trip circuit breaker on HTTP 429 and return explicit error if exhausted |
+| Groq | Account- and model-specific rolling request and token limits | OpenAI REST adapter; trip circuit breaker on HTTP 429 and attempt Gemini fallback before commitment |
 | OpenRouter (:free) | Shared free-model capacity and account limits | Deferred beyond the MVP |
 | DeepSeek (API balance) | Prepaid token balance | Optional emergency fallback when all free-tier quotas are exhausted (deferred beyond MVP) |
 
-### Deferred Circuit Breaking
-No shared circuit-breaker state or locally predicted reset schedule is implemented or required for the MVP. Add coordinated accounting or circuit breaking only after actual usage demonstrates a need.
+### Circuit Breaker State Management
+Initial iterations implement best-effort isolate-local circuit breakers with timestamp-based single-probe
+canary gates (see [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md)). Rate limit
+headers (`Retry-After`, `x-ratelimit-reset-requests`, `x-ratelimit-reset-tokens`) are normalized into a unified
+`cooldown_until` timestamp. Distributed KV or Durable Object state management is evaluated as a post-MVP
+evolutionary path.
 
 ## 5. Schema Normalization Details
 
-### Shared Compatible Upstreams
-Use a small validated request representation, not a native provider translation
-framework. Map max_tokens/max_completion_tokens to the selected upstream's verified
-output-limit field. Extension mappings are explicit per provider; unknown extras
-are ignored without overriding model, auth, or endpoint. Preserve tool history and
-provider-required tool metadata only through approved mappings. Native Gemini REST
-translation, Anthropic adapters, and a general provider IR are deferred.
+### Provider Adaptation
+- **Groq**: Direct OpenAI Chat Completions REST API pass-through with field validation.
+- **Google Gemini**: Dedicated bidirectional translation adapter converting OpenAI request bodies into
+  native Google REST content objects (`contents`, `generationConfig`, `tools`, and `functionDeclarations`), and
+  streaming response chunks back into OpenAI-compatible SSE events.
+Map `max_tokens`/`max_completion_tokens` to the selected upstream's verified output-limit field. Extension
+mappings are explicit per provider; unknown extras are ignored without overriding model, auth, or endpoint.
+Preserve tool history and provider-required tool metadata through approved mappings. Anthropic adapters
+and a general multi-provider intermediate representation remain deferred.
