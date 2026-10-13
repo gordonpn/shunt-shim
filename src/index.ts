@@ -19,13 +19,14 @@ export function createErrorResponse(
   message: string,
   type: string,
   code: string,
-  param: string | null = null,
+  param?: string | null,
 ): ApiError {
+  const errorParam = param ?? null;
   return {
     error: {
       message,
       type,
-      param,
+      param: errorParam,
       code,
     },
   };
