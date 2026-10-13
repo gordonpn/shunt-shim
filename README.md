@@ -2,7 +2,7 @@
 
 Status: Cloudflare Worker service bootstrapped with reproducible quality gates. See [the proposed MVP and deployment options](docs/MVP.md) for the initial scope, acceptance criteria, and language/platform trade-offs. The capabilities and setup instructions below describe the implemented foundation and planned routing.
 
-`shunt-shim` is a planned OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP exposes one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. Cloudflare Workers (TypeScript / Hono) has been accepted and bootstrapped as the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md)).
+`shunt-shim` is a planned OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP exposes one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. Cloudflare Workers (TypeScript / Hono) has been accepted and bootstrapped as the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md)). Model fallback and provider adaptation strategies are documented in [ADR 0002](docs/adr/0002-model-fallback-and-provider-adaptation-strategy.md).
 
 The goal is to let DeepSeek Review, OpenCodeReview, and PR-Agent use one endpoint without client code changes. Compatibility requires deployed evidence for all three, including OpenCodeReview's tool-call round trip. See the [pinned client sources and contract](docs/COMPATIBILITY.md).
 
