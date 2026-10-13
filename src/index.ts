@@ -19,13 +19,14 @@ export function createErrorResponse(
   message: string,
   type: string,
   code: string,
-  param: string | null = null,
+  param?: string | null,
 ): ApiError {
+  const errorParam = param ?? null;
   return {
     error: {
       message,
       type,
-      param,
+      param: errorParam,
       code,
     },
   };
@@ -150,9 +151,10 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
   const body = parsed as ChatCompletionRequestBody;
 
   if (!body.model || body.model !== "fast") {
+    const requestedModel = body.model ?? "";
     return c.json(
       createErrorResponse(
-        `The model '${body.model ?? ""}' does not exist or is not available.`,
+        `The model '${requestedModel}' does not exist or is not available.`,
         "invalid_request_error",
         "model_not_found",
         "model",
