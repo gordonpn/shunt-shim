@@ -15,8 +15,43 @@ export const ALLOWED_PRIMARY_MODELS = [
 
 export const ALLOWED_FALLBACK_MODELS = ["gemini-2.5-flash-lite"] as const;
 
-export function validateEnvironment(_env: GatewayEnv): void {
-  // Stub for red-phase verification
+export function validateEnvironment(env: GatewayEnv): void {
+  const gatewayTokens = env.GATEWAY_TOKENS?.trim();
+  if (!gatewayTokens) {
+    throw new Error("Missing required environment secret: GATEWAY_TOKENS");
+  }
+
+  const groqApiKey = env.GROQ_API_KEY?.trim();
+  if (!groqApiKey) {
+    throw new Error("Missing required environment secret: GROQ_API_KEY");
+  }
+
+  const geminiApiKey = env.GEMINI_API_KEY?.trim();
+  if (!geminiApiKey) {
+    throw new Error("Missing required environment secret: GEMINI_API_KEY");
+  }
+
+  if (env.PRIMARY_MODEL !== undefined) {
+    const isAllowedPrimary = (
+      ALLOWED_PRIMARY_MODELS as readonly string[]
+    ).includes(env.PRIMARY_MODEL);
+    if (!isAllowedPrimary) {
+      throw new Error(
+        `Disallowed PRIMARY_MODEL configuration: ${env.PRIMARY_MODEL}`,
+      );
+    }
+  }
+
+  if (env.FALLBACK_MODEL !== undefined) {
+    const isAllowedFallback = (
+      ALLOWED_FALLBACK_MODELS as readonly string[]
+    ).includes(env.FALLBACK_MODEL);
+    if (!isAllowedFallback) {
+      throw new Error(
+        `Disallowed FALLBACK_MODEL configuration: ${env.FALLBACK_MODEL}`,
+      );
+    }
+  }
 }
 
 export interface ApiError {
@@ -48,12 +83,12 @@ export function createErrorResponse(
 export const authMiddleware: MiddlewareHandler<{
   Bindings: GatewayEnv;
 }> = async (c, next) => {
-  const configuredToken = c.env?.GATEWAY_TOKENS;
+  const configuredToken = c.env?.GATEWAY_TOKENS?.trim();
   const authHeader = c.req.header("Authorization");
   const apiKeyHeader = c.req.header("x-api-key");
 
   let bearerToken: string | undefined;
-  if (authHeader) {
+  if (authHeader !== undefined) {
     if (authHeader.startsWith("Bearer ")) {
       bearerToken = authHeader.slice(7).trim();
     } else {
@@ -68,18 +103,33 @@ export const authMiddleware: MiddlewareHandler<{
     }
   }
 
-  if (bearerToken && apiKeyHeader && bearerToken !== apiKeyHeader) {
+  let trimmedApiKey: string | undefined;
+  if (apiKeyHeader !== undefined) {
+    trimmedApiKey = apiKeyHeader.trim();
+    if (!trimmedApiKey) {
+      return c.json(
+        createErrorResponse(
+          "Incorrect or missing API key provided",
+          "invalid_request_error",
+          "invalid_api_key",
+        ),
+        401,
+      );
+    }
+  }
+
+  if (bearerToken && trimmedApiKey && bearerToken !== trimmedApiKey) {
     return c.json(
       createErrorResponse(
         "Conflicting Authorization and x-api-key headers provided",
         "invalid_request_error",
         "invalid_api_key",
       ),
-      400,
+      401,
     );
   }
 
-  const token = bearerToken ?? apiKeyHeader;
+  const token = bearerToken ?? trimmedApiKey;
   if (!token || !configuredToken || token !== configuredToken) {
     return c.json(
       createErrorResponse(
