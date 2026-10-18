@@ -503,7 +503,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
       expect(calls.length).toBe(2);
     });
 
-    it("returns HTTP 504 / 502 when Groq returns 429 but fallback Gemini times out", async () => {
+    it("returns HTTP 504 when Groq returns 429 but fallback Gemini times out", async () => {
       captureFetch(async (url) => {
         if (isGroqRequest(url)) {
           return new Response("Groq quota exhausted", { status: 429 });
@@ -514,8 +514,8 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
       const res = await postChat();
       const body = (await res.json()) as ApiError;
 
-      expect([502, 504]).toContain(res.status);
-      expect(body.error).toBeDefined();
+      expect(res.status).toBe(504);
+      expect(body.error.code).toBe("gateway_timeout");
       expect(calls.length).toBe(2);
     });
 
