@@ -139,10 +139,6 @@ export type ValidatedToolChoice =
   | "none"
   | { type: "function"; function: { name: string } };
 
-export interface ValidatedStreamOptions {
-  include_usage?: boolean | undefined;
-}
-
 export interface ValidatedChatCompletionRequest {
   model: "fast";
   messages: ValidatedMessage[];
@@ -151,8 +147,8 @@ export interface ValidatedChatCompletionRequest {
   temperature?: number | undefined;
   max_tokens?: number | undefined;
   max_completion_tokens?: number | undefined;
-  stream: boolean;
-  stream_options?: ValidatedStreamOptions | undefined;
+  stream: false;
+  stream_options?: never;
   extensions: Record<string, unknown>;
 }
 
@@ -791,55 +787,29 @@ export function validateChatCompletionRequest(
     };
   }
 
-  const isStream = record.stream === true;
-  let validatedStreamOptions: ValidatedStreamOptions | undefined;
+  if (record.stream === true) {
+    return {
+      ok: false,
+      status: 400,
+      error: createErrorResponse(
+        "Streaming is not supported by this gateway. Please omit 'stream' or set 'stream': false.",
+        "invalid_request_error",
+        "unsupported_parameter",
+        "stream",
+      ),
+    };
+  }
 
-  if (record.stream_options !== undefined && record.stream_options !== null) {
-    if (!isStream) {
-      return {
-        ok: false,
-        status: 400,
-        error: createErrorResponse(
-          "stream_options is only permitted when stream is true.",
-          "invalid_request_error",
-          "invalid_request_error",
-          "stream_options",
-        ),
-      };
-    }
-    if (
-      typeof record.stream_options !== "object" ||
-      Array.isArray(record.stream_options)
-    ) {
-      return {
-        ok: false,
-        status: 400,
-        error: createErrorResponse(
-          "stream_options must be an object.",
-          "invalid_request_error",
-          "invalid_request_error",
-          "stream_options",
-        ),
-      };
-    }
-    const soObj = record.stream_options as Record<string, unknown>;
-    if (
-      soObj.include_usage !== undefined &&
-      typeof soObj.include_usage !== "boolean"
-    ) {
-      return {
-        ok: false,
-        status: 400,
-        error: createErrorResponse(
-          "stream_options.include_usage must be a boolean.",
-          "invalid_request_error",
-          "invalid_request_error",
-          "stream_options.include_usage",
-        ),
-      };
-    }
-    validatedStreamOptions = {
-      include_usage: soObj.include_usage as boolean | undefined,
+  if (record.stream_options !== undefined) {
+    return {
+      ok: false,
+      status: 400,
+      error: createErrorResponse(
+        "stream_options is not supported by this gateway.",
+        "invalid_request_error",
+        "unsupported_parameter",
+        "stream_options",
+      ),
     };
   }
 
@@ -873,8 +843,7 @@ export function validateChatCompletionRequest(
       temperature: record.temperature as number | undefined,
       max_tokens: resolvedMaxTokens,
       max_completion_tokens: resolvedMaxCompletionTokens,
-      stream: isStream,
-      stream_options: validatedStreamOptions,
+      stream: false,
       extensions,
     },
   };
