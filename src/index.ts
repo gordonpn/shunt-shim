@@ -1,4 +1,29 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { createErrorResponse } from "./errors.js";
+import {
+  readRequestBodyWithLimit,
+  validateChatCompletionRequest,
+} from "./validation.js";
+
+export {
+  type ApiError,
+  createErrorResponse,
+} from "./errors.js";
+
+export {
+  MAX_BODY_BYTES,
+  type RequestValidationResult,
+  readRequestBodyWithLimit,
+  type ValidatedChatCompletionRequest,
+  type ValidatedFunctionCall,
+  type ValidatedFunctionDeclaration,
+  type ValidatedMessage,
+  type ValidatedStreamOptions,
+  type ValidatedTool,
+  type ValidatedToolCall,
+  type ValidatedToolChoice,
+  validateChatCompletionRequest,
+} from "./validation.js";
 
 export interface GatewayEnv {
   GATEWAY_TOKENS?: string;
@@ -12,6 +37,12 @@ export const ALLOWED_PRIMARY_MODELS = ["qwen/qwen3.8-27b"] as const;
 
 export const ALLOWED_FALLBACK_MODELS = ["gemini-2.5-flash-lite"] as const;
 
+/**
+ * Validates the required and optional gateway environment variables.
+ *
+ * @param env - Environment bindings containing secrets and model configuration.
+ * @throws Error if any required secret is missing or if configured models are not allowed.
+ */
 export function validateEnvironment(env: GatewayEnv): void {
   const gatewayTokens = env.GATEWAY_TOKENS?.trim();
   if (!gatewayTokens) {
@@ -49,32 +80,6 @@ export function validateEnvironment(env: GatewayEnv): void {
       );
     }
   }
-}
-
-export interface ApiError {
-  error: {
-    message: string;
-    type: string;
-    param: string | null;
-    code: string;
-  };
-}
-
-export function createErrorResponse(
-  message: string,
-  type: string,
-  code: string,
-  param?: string | null,
-): ApiError {
-  const errorParam = param ?? null;
-  return {
-    error: {
-      message,
-      type,
-      param: errorParam,
-      code,
-    },
-  };
 }
 
 export const authMiddleware: MiddlewareHandler<{
@@ -196,15 +201,15 @@ app.on(["POST", "PUT", "DELETE", "PATCH"], "/v1/models", (c) => {
   );
 });
 
-interface ChatCompletionRequestBody {
-  model?: string;
-  stream?: boolean;
-}
-
 const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
+  const bodyReadResult = await readRequestBodyWithLimit(c.req.raw);
+  if (!bodyReadResult.ok) {
+    return c.json(bodyReadResult.error, bodyReadResult.status);
+  }
+
   let parsed: unknown;
   try {
-    parsed = await c.req.json();
+    parsed = JSON.parse(bodyReadResult.text);
   } catch {
     return c.json(
       createErrorResponse(
@@ -216,36 +221,16 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
     );
   }
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return c.json(
-      createErrorResponse(
-        "Invalid JSON request body",
-        "invalid_request_error",
-        "invalid_json",
-      ),
-      400,
-    );
+  const validation = validateChatCompletionRequest(parsed);
+  if (!validation.ok) {
+    return c.json(validation.error, validation.status);
   }
 
-  const body = parsed as ChatCompletionRequestBody;
-
-  if (!body.model || body.model !== "fast") {
-    const requestedModel = body.model ?? "";
-    return c.json(
-      createErrorResponse(
-        `The model '${requestedModel}' does not exist or is not available.`,
-        "invalid_request_error",
-        "model_not_found",
-        "model",
-      ),
-      404,
-    );
-  }
-
+  const body = validation.data;
   const completionId = `chatcmpl-${crypto.randomUUID()}`;
   const created = Math.floor(Date.now() / 1000);
 
-  if (body.stream === true) {
+  if (body.stream) {
     const chunk = {
       id: completionId,
       object: "chat.completion.chunk",
