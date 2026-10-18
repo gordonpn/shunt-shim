@@ -125,6 +125,53 @@ const VALID_FINISH_REASONS = new Set([
   "content_filter",
 ]);
 
+function validateUpstreamToolCalls(
+  rawToolCalls: unknown,
+): ValidatedToolCall[] | null {
+  if (!Array.isArray(rawToolCalls) || rawToolCalls.length === 0) {
+    return null;
+  }
+
+  const validated: ValidatedToolCall[] = [];
+  for (const tc of rawToolCalls) {
+    if (typeof tc !== "object" || tc === null || Array.isArray(tc)) {
+      return null;
+    }
+    const record = tc as Record<string, unknown>;
+    if (typeof record.id !== "string" || record.id.length === 0) {
+      return null;
+    }
+    if (record.type !== "function") {
+      return null;
+    }
+    if (
+      typeof record.function !== "object" ||
+      record.function === null ||
+      Array.isArray(record.function)
+    ) {
+      return null;
+    }
+    const fn = record.function as Record<string, unknown>;
+    if (
+      typeof fn.name !== "string" ||
+      fn.name.length === 0 ||
+      typeof fn.arguments !== "string"
+    ) {
+      return null;
+    }
+    validated.push({
+      id: record.id,
+      type: "function",
+      function: {
+        name: fn.name,
+        arguments: fn.arguments,
+      },
+    });
+  }
+
+  return validated;
+}
+
 function normalizeChoice(
   rawChoice: unknown,
   fallbackIndex: number,
@@ -173,8 +220,19 @@ function normalizeChoice(
   }
 
   let toolCalls: ValidatedToolCall[] | undefined;
-  if (Array.isArray(messageRecord.tool_calls)) {
-    toolCalls = messageRecord.tool_calls as ValidatedToolCall[];
+  if (
+    messageRecord.tool_calls !== undefined &&
+    messageRecord.tool_calls !== null
+  ) {
+    const validated = validateUpstreamToolCalls(messageRecord.tool_calls);
+    if (validated === null) {
+      return null;
+    }
+    toolCalls = validated;
+  }
+
+  if (content === null && toolCalls === undefined) {
+    return null;
   }
 
   const normalizedMessage: NormalizedChoice["message"] = {

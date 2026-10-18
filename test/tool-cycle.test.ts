@@ -625,6 +625,201 @@ describe("JSON Tool Cycle Specification (Subtask #22 / Story #20)", () => {
       }
     });
 
+    it("maps upstream choices with null or missing content and absent tool_calls to HTTP 502 bad_gateway", async () => {
+      const invalidContentCases = [
+        { choices: [{ finish_reason: "stop", message: { content: null } }] },
+        { choices: [{ finish_reason: "stop", message: {} }] },
+        { choices: [{ finish_reason: "length", message: { content: null } }] },
+      ];
+
+      for (const upstreamResponse of invalidContentCases) {
+        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+          new Response(JSON.stringify(upstreamResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+
+        const res = await postChat({
+          model: "fast",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+
+        expect(res.status).toBe(502);
+        const json = (await res.json()) as { error: { code: string } };
+        expect(json.error.code).toBe("bad_gateway");
+      }
+    });
+
+    it("maps upstream choices with malformed or empty tool_calls to HTTP 502 bad_gateway", async () => {
+      const malformedToolCallsCases = [
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: { content: null, tool_calls: [] },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: { content: null, tool_calls: "not-an-array" },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: { content: null, tool_calls: [null] },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: "",
+                    type: "function",
+                    function: { name: "test", arguments: "{}" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: "call_1",
+                    type: "not_a_function",
+                    function: { name: "test", arguments: "{}" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: "call_1",
+                    type: "function",
+                    function: null,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: "call_1",
+                    type: "function",
+                    function: { name: "", arguments: "{}" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: "call_1",
+                    type: "function",
+                    function: { name: "test", arguments: 123 },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ];
+
+      for (const upstreamResponse of malformedToolCallsCases) {
+        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+          new Response(JSON.stringify(upstreamResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+
+        const res = await postChat({
+          model: "fast",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+
+        expect(res.status).toBe(502);
+        const json = (await res.json()) as { error: { code: string } };
+        expect(json.error.code).toBe("bad_gateway");
+      }
+    });
+
+    it("accepts upstream choice with null tool_calls when valid string content is present", async () => {
+      const responseWithNullToolCalls = {
+        ...groqFixtures.textCompletion,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Valid text response",
+              tool_calls: null,
+            },
+            finish_reason: "stop",
+          },
+        ],
+      };
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(responseWithNullToolCalls), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hello" }],
+      });
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        choices: Array<{ message: { content: string; tool_calls?: unknown } }>;
+      };
+      const choice = requireDefined(json.choices[0]);
+      expect(choice.message.content).toBe("Valid text response");
+      expect(choice.message.tool_calls).toBeUndefined();
+    });
+
     it("preserves optional reasoning_content when returned by upstream", async () => {
       const reasoningResponse = {
         ...groqFixtures.textCompletion,
