@@ -288,6 +288,18 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       const res = await postChat(req);
       expect(res.status).toBe(200);
     });
+
+    it("rejects model aliases with surrounding whitespace", async () => {
+      const whitespaceAliases = [" fast ", "fast ", " fast", "\tfast\n"];
+      for (const model of whitespaceAliases) {
+        const req = createValidChatRequest({ model });
+        const res = await postChat(req);
+        expect(res.status).toBe(404);
+        const json = (await res.json()) as ApiError;
+        expect(json.error.code).toBe("model_not_found");
+        expect(json.error.param).toBe("model");
+      }
+    });
   });
 
   describe("Messages Array Structure Validation (HTTP 400 invalid_request_error)", () => {
@@ -567,6 +579,34 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       }
     });
 
+    it("rejects duplicate tool-call IDs across assistant message tool_calls", async () => {
+      const req = createValidChatRequest({
+        messages: [
+          createValidMessage(),
+          {
+            role: "assistant",
+            tool_calls: [
+              {
+                id: "call_duplicate_1",
+                type: "function",
+                function: { name: "toolA", arguments: "{}" },
+              },
+              {
+                id: "call_duplicate_1",
+                type: "function",
+                function: { name: "toolB", arguments: "{}" },
+              },
+            ],
+          },
+        ],
+      });
+      const res = await postChat(req);
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as ApiError;
+      expect(json.error.type).toBe("invalid_request_error");
+      expect(json.error.param).toBe("tool_calls");
+    });
+
     it("rejects tool role messages with missing, empty, or non-string tool_call_id", async () => {
       const invalidIds = ["", 123, null, undefined];
       for (const tool_call_id of invalidIds) {
@@ -752,6 +792,25 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       }
     });
 
+    it("accepts tool declaration without description and with parameters", async () => {
+      const req = createValidChatRequest({
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "no_desc_tool",
+              parameters: {
+                type: "object",
+                properties: { query: { type: "string" } },
+              },
+            },
+          },
+        ],
+      });
+      const res = await postChat(req);
+      expect(res.status).toBe(200);
+    });
+
     it("rejects tool function declarations with invalid description or parameters", async () => {
       const invalidDescReq = createValidChatRequest({
         tools: [
@@ -871,6 +930,27 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       const req = createValidChatRequest({
         messages: [{ role: "user", content: hugePrompt }],
         max_completion_tokens: 4000,
+      });
+      const res = await postChat(req);
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as ApiError;
+      expect(json.error.code).toBe("context_length_exceeded");
+    });
+
+    it("rejects requests exceeding combined context ceiling when tool schemas are large", async () => {
+      const hugeDescription = "a".repeat(520000);
+      const req = createValidChatRequest({
+        messages: [{ role: "user", content: "hello" }],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "large_tool",
+              description: hugeDescription,
+              parameters: { type: "object" },
+            },
+          },
+        ],
       });
       const res = await postChat(req);
       expect(res.status).toBe(400);
@@ -1010,6 +1090,17 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
 
       const res = await postChat(reqMalicious);
       expect(res.status).toBe(400);
+    });
+
+    it("creates extensions without a prototype and ignores __proto__", async () => {
+      const payloadString =
+        '{"model":"fast","messages":[{"role":"user","content":"hi"}],"__proto__":{"polluted":"yes"},"custom_prop":123}';
+      const parsed = JSON.parse(payloadString) as Record<string, unknown>;
+      const res = await postChat(parsed);
+      expect(res.status).toBe(200);
+      expect(
+        (Object.prototype as { polluted?: unknown }).polluted,
+      ).toBeUndefined();
     });
   });
 

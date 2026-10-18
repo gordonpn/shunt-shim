@@ -12,6 +12,12 @@ export const ALLOWED_PRIMARY_MODELS = ["qwen/qwen3.8-27b"] as const;
 
 export const ALLOWED_FALLBACK_MODELS = ["gemini-2.5-flash-lite"] as const;
 
+/**
+ * Validates the required and optional gateway environment variables.
+ *
+ * @param env - Environment bindings containing secrets and model configuration.
+ * @throws Error if any required secret is missing or if configured models are not allowed.
+ */
 export function validateEnvironment(env: GatewayEnv): void {
   const gatewayTokens = env.GATEWAY_TOKENS?.trim();
   if (!gatewayTokens) {
@@ -60,6 +66,15 @@ export interface ApiError {
   };
 }
 
+/**
+ * Creates a standardized API error response object.
+ *
+ * @param message - Human-readable description of the error.
+ * @param type - High-level error classification string.
+ * @param code - Specific machine-readable error code.
+ * @param param - Parameter name associated with the error, or null.
+ * @returns Standardized API error object.
+ */
 export function createErrorResponse(
   message: string,
   type: string,
@@ -198,6 +213,13 @@ app.on(["POST", "PUT", "DELETE", "PATCH"], "/v1/models", (c) => {
 
 export const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10,485,760 bytes
 
+/**
+ * Reads the request body stream up to the specified byte limit.
+ *
+ * @param req - Incoming HTTP request to read.
+ * @param limit - Maximum permitted body size in bytes. Defaults to 10 MB.
+ * @returns Success object with decoded text, or failure object with status code and error details.
+ */
 export async function readRequestBodyWithLimit(
   req: Request,
   limit: number = MAX_BODY_BYTES,
@@ -378,6 +400,12 @@ function isValidTemperature(val: unknown): val is number {
   );
 }
 
+/**
+ * Validates and normalizes an untrusted chat completion request payload.
+ *
+ * @param raw - Untrusted input object from parsed JSON.
+ * @returns Validation result containing sanitized request data or error details with HTTP status.
+ */
 export function validateChatCompletionRequest(
   raw: unknown,
 ): RequestValidationResult {
@@ -395,7 +423,7 @@ export function validateChatCompletionRequest(
 
   const record = raw as Record<string, unknown>;
 
-  if (typeof record.model !== "string" || record.model.trim() !== "fast") {
+  if (typeof record.model !== "string" || record.model !== "fast") {
     const requestedModel = typeof record.model === "string" ? record.model : "";
     return {
       ok: false,
@@ -437,6 +465,7 @@ export function validateChatCompletionRequest(
     }
   }
 
+  const seenToolCallIds = new Set<string>();
   const outstandingToolCallIds = new Set<string>();
   const validatedMessages: ValidatedMessage[] = [];
 
@@ -573,6 +602,19 @@ export function validateChatCompletionRequest(
               ),
             };
           }
+          if (seenToolCallIds.has(tcObj.id)) {
+            return {
+              ok: false,
+              status: 400,
+              error: createErrorResponse(
+                `Duplicate tool call id '${tcObj.id}' found in assistant message.`,
+                "invalid_request_error",
+                "invalid_request_error",
+                "tool_calls",
+              ),
+            };
+          }
+          seenToolCallIds.add(tcObj.id);
           outstandingToolCallIds.add(tcObj.id);
           validatedToolCalls.push({
             id: tcObj.id,
@@ -907,6 +949,17 @@ export function validateChatCompletionRequest(
       }
     }
   }
+  if (validatedTools) {
+    for (const tool of validatedTools) {
+      totalChars += tool.function.name.length;
+      if (tool.function.description) {
+        totalChars += tool.function.description.length;
+      }
+      if (tool.function.parameters) {
+        totalChars += JSON.stringify(tool.function.parameters).length;
+      }
+    }
+  }
   const estimatedPromptTokens = Math.ceil(totalChars / 4);
   if (estimatedPromptTokens + (winningMaxTokens ?? 0) > 128000) {
     return {
@@ -1000,9 +1053,9 @@ export function validateChatCompletionRequest(
     };
   }
 
-  const extensions: Record<string, unknown> = {};
+  const extensions: Record<string, unknown> = Object.create(null);
   for (const [key, val] of Object.entries(record)) {
-    if (!KNOWN_REQUEST_FIELDS.has(key)) {
+    if (!KNOWN_REQUEST_FIELDS.has(key) && key !== "__proto__") {
       extensions[key] = val;
     }
   }
