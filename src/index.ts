@@ -104,6 +104,23 @@ export function validateEnvironment(env: GatewayEnv): void {
       );
     }
   }
+
+  for (const [name, value] of [
+    ["GROQ_BASE_URL", env.GROQ_BASE_URL],
+    ["GEMINI_BASE_URL", env.GEMINI_BASE_URL],
+  ] as const) {
+    if (value !== undefined) {
+      let parsed: URL;
+      try {
+        parsed = new URL(value);
+      } catch {
+        throw new Error(`Invalid ${name} configuration: ${value}`);
+      }
+      if (parsed.protocol !== "https:") {
+        throw new Error(`Disallowed ${name} protocol: must use https`);
+      }
+    }
+  }
 }
 
 export const authMiddleware: MiddlewareHandler<{

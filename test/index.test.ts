@@ -691,6 +691,58 @@ describe("Gateway HTTP Entrypoint", () => {
       ).toThrow("Disallowed PRIMARY_PROVIDER configuration: anthropic");
     });
 
+    it("accepts valid https URLs for GROQ_BASE_URL and GEMINI_BASE_URL", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GROQ_BASE_URL: "https://custom.groq.example.com/v1",
+          GEMINI_BASE_URL: "https://custom.gemini.example.com/v1",
+        }),
+      ).not.toThrow();
+    });
+
+    it("throws explicit error when GROQ_BASE_URL or GEMINI_BASE_URL is not https", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GROQ_BASE_URL: "http://insecure.groq.example.com/v1",
+        }),
+      ).toThrow("Disallowed GROQ_BASE_URL protocol: must use https");
+
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GEMINI_BASE_URL: "http://insecure.gemini.example.com/v1",
+        }),
+      ).toThrow("Disallowed GEMINI_BASE_URL protocol: must use https");
+    });
+
+    it("throws explicit error when GROQ_BASE_URL or GEMINI_BASE_URL is an invalid URL", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GROQ_BASE_URL: "not a valid url",
+        }),
+      ).toThrow("Invalid GROQ_BASE_URL configuration: not a valid url");
+
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GEMINI_BASE_URL: "not a valid url",
+        }),
+      ).toThrow("Invalid GEMINI_BASE_URL configuration: not a valid url");
+    });
+
     it("ensures error messages never leak secret values across validation cases", () => {
       const privateSecret = "super-secret-key-that-must-not-leak";
       const cases = [
