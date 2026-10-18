@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   type ApiError,
-  type GatewayEnv,
   app,
+  type GatewayEnv,
   readRequestBodyWithLimit,
 } from "../src/index.js";
 
