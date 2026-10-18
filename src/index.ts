@@ -362,6 +362,22 @@ const KNOWN_REQUEST_FIELDS = new Set([
   "stream_options",
 ]);
 
+function isValidTokenLimit(val: unknown): val is number {
+  return (
+    typeof val === "number" && Number.isInteger(val) && val > 0 && val <= 8192
+  );
+}
+
+function isValidTemperature(val: unknown): val is number {
+  return (
+    typeof val === "number" &&
+    !Number.isNaN(val) &&
+    Number.isFinite(val) &&
+    val >= 0.0 &&
+    val <= 2.0
+  );
+}
+
 export function validateChatCompletionRequest(
   raw: unknown,
 ): RequestValidationResult {
@@ -846,12 +862,7 @@ export function validateChatCompletionRequest(
   }
 
   if (record.max_tokens !== undefined) {
-    if (
-      typeof record.max_tokens !== "number" ||
-      !Number.isInteger(record.max_tokens) ||
-      record.max_tokens <= 0 ||
-      record.max_tokens > 8192
-    ) {
+    if (!isValidTokenLimit(record.max_tokens)) {
       return {
         ok: false,
         status: 400,
@@ -866,12 +877,7 @@ export function validateChatCompletionRequest(
   }
 
   if (record.max_completion_tokens !== undefined) {
-    if (
-      typeof record.max_completion_tokens !== "number" ||
-      !Number.isInteger(record.max_completion_tokens) ||
-      record.max_completion_tokens <= 0 ||
-      record.max_completion_tokens > 8192
-    ) {
+    if (!isValidTokenLimit(record.max_completion_tokens)) {
       return {
         ok: false,
         status: 400,
@@ -915,13 +921,7 @@ export function validateChatCompletionRequest(
   }
 
   if (record.temperature !== undefined) {
-    if (
-      typeof record.temperature !== "number" ||
-      Number.isNaN(record.temperature) ||
-      !Number.isFinite(record.temperature) ||
-      record.temperature < 0.0 ||
-      record.temperature > 2.0
-    ) {
+    if (!isValidTemperature(record.temperature)) {
       return {
         ok: false,
         status: 400,
