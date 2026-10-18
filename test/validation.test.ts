@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { type ApiError, type GatewayEnv, app } from "../src/index.js";
+import {
+  type ApiError,
+  type GatewayEnv,
+  app,
+  readRequestBodyWithLimit,
+} from "../src/index.js";
 
 type MessageRole = "system" | "user" | "assistant" | "tool";
 
@@ -128,6 +133,17 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       expect(res.status).toBe(200);
     });
 
+    it("accepts request bodies with valid Content-Length within limit", async () => {
+      const payload = createValidChatRequest();
+      const body = JSON.stringify(payload);
+      const res = await postChat(body, "/v1/chat/completions", {
+        Authorization: "Bearer test-gateway-token",
+        "Content-Type": "application/json",
+        "Content-Length": String(body.length),
+      });
+      expect(res.status).toBe(200);
+    });
+
     it("rejects request bodies exceeding 10 MB with HTTP 413 prior to JSON parsing", async () => {
       const oversizedString = "x".repeat(MAX_BODY_BYTES + 10);
       const res = await postChat(oversizedString, "/v1/chat/completions", {
@@ -153,6 +169,49 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       expect(res.status).toBe(413);
       const json = (await res.json()) as ApiError;
       expect(json.error.code).toBe("payload_too_large");
+    });
+
+    it("handles null request bodies, custom byte limits, and stream read failures", async () => {
+      const nullBodyReq = new Request("http://localhost/v1/chat/completions", {
+        method: "POST",
+      });
+      const nullRes = await readRequestBodyWithLimit(nullBodyReq);
+      expect(nullRes.ok).toBe(false);
+      if (!nullRes.ok) {
+        expect(nullRes.status).toBe(400);
+        expect(nullRes.error.error.code).toBe("invalid_json");
+      }
+
+      const customLimitReq = new Request(
+        "http://localhost/v1/chat/completions",
+        {
+          method: "POST",
+          body: "12345",
+        },
+      );
+      const limitRes = await readRequestBodyWithLimit(customLimitReq, 2);
+      expect(limitRes.ok).toBe(false);
+      if (!limitRes.ok) {
+        expect(limitRes.status).toBe(413);
+        expect(limitRes.error.error.code).toBe("payload_too_large");
+      }
+
+      const errorStream = new ReadableStream({
+        start(controller) {
+          controller.error(new Error("Simulated stream error"));
+        },
+      });
+      const errorReq = new Request("http://localhost/v1/chat/completions", {
+        method: "POST",
+        body: errorStream,
+        duplex: "half",
+      } as RequestInit);
+      const errRes = await readRequestBodyWithLimit(errorReq);
+      expect(errRes.ok).toBe(false);
+      if (!errRes.ok) {
+        expect(errRes.status).toBe(400);
+        expect(errRes.error.error.code).toBe("invalid_json");
+      }
     });
   });
 
@@ -320,6 +379,17 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       const res = await postChat(req);
       expect(res.status).toBe(200);
     });
+
+    it("accepts assistant messages without tool_calls having valid string content", async () => {
+      const req = createValidChatRequest({
+        messages: [
+          createValidMessage(),
+          { role: "assistant", content: "I am a helpful assistant." },
+        ],
+      });
+      const res = await postChat(req);
+      expect(res.status).toBe(200);
+    });
   });
 
   describe("Message Content & Multimodal Rejection (HTTP 400 invalid_request_error)", () => {
@@ -394,6 +464,29 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       }
     });
 
+    it("rejects assistant messages with tool_calls having non-string and non-null content", async () => {
+      const toolCall: ToolCall = {
+        id: "call_inv_content",
+        type: "function",
+        function: { name: "test_fn", arguments: "{}" },
+      };
+      const req = createValidChatRequest({
+        messages: [
+          createValidMessage(),
+          {
+            role: "assistant",
+            content: 123 as unknown as string,
+            tool_calls: [toolCall],
+          },
+          { role: "tool", tool_call_id: "call_inv_content", content: "ok" },
+        ],
+      });
+      const res = await postChat(req);
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as ApiError;
+      expect(json.error.param).toBe("content");
+    });
+
     it("rejects tool role messages with missing or non-string content", async () => {
       const invalidContents = [null, undefined, 123, true, {}, []];
       for (const content of invalidContents) {
@@ -424,6 +517,9 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       const invalidToolCalls = [
         "not-an-array",
         [],
+        [null],
+        [123],
+        [[]],
         [{}],
         [
           {
@@ -458,10 +554,32 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
 
       for (const tool_calls of invalidToolCalls) {
         const req = createValidChatRequest({
-          messages: [createValidMessage(), { role: "assistant", tool_calls }],
+          messages: [
+            createValidMessage(),
+            {
+              role: "assistant",
+              tool_calls: tool_calls as unknown as ToolCall[],
+            },
+          ],
         });
         const res = await postChat(req);
         expect(res.status).toBe(400);
+      }
+    });
+
+    it("rejects tool role messages with missing, empty, or non-string tool_call_id", async () => {
+      const invalidIds = ["", 123, null, undefined];
+      for (const tool_call_id of invalidIds) {
+        const req = createValidChatRequest({
+          messages: [
+            createValidMessage(),
+            { role: "tool", tool_call_id, content: "result" },
+          ],
+        });
+        const res = await postChat(req);
+        expect(res.status).toBe(400);
+        const json = (await res.json()) as ApiError;
+        expect(json.error.param).toBe("tool_call_id");
       }
     });
 
@@ -633,6 +751,65 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
         expect(res.status).toBe(200);
       }
     });
+
+    it("rejects tool function declarations with invalid description or parameters", async () => {
+      const invalidDescReq = createValidChatRequest({
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "test_fn",
+              description: 123 as unknown as string,
+            },
+          },
+        ],
+      });
+      const resDesc = await postChat(invalidDescReq);
+      expect(resDesc.status).toBe(400);
+
+      const invalidParamVariants = [123, null, []];
+      for (const parameters of invalidParamVariants) {
+        const invalidParamReq = createValidChatRequest({
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "test_fn",
+                parameters: parameters as unknown as Record<string, unknown>,
+              },
+            },
+          ],
+        });
+        const resParam = await postChat(invalidParamReq);
+        expect(resParam.status).toBe(400);
+      }
+    });
+
+    it("rejects invalid tool_choice object shapes and unrecognized values", async () => {
+      const tools: ToolDeclaration[] = [
+        { type: "function", function: { name: "test_fn" } },
+      ];
+      const invalidChoices = [
+        123,
+        true,
+        "invalid_choice_string",
+        { type: "custom" },
+        { type: "function" },
+        { type: "function", function: null },
+        { type: "function", function: [] },
+      ];
+
+      for (const tool_choice of invalidChoices) {
+        const req = createValidChatRequest({
+          tools,
+          tool_choice: tool_choice as ToolChoice,
+        });
+        const res = await postChat(req);
+        expect(res.status).toBe(400);
+        const json = (await res.json()) as ApiError;
+        expect(json.error.param).toBe("tool_choice");
+      }
+    });
   });
 
   describe("Token Limits & Precedence Validation (HTTP 400 invalid_request_error)", () => {
@@ -791,6 +968,20 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       expect(res.status).toBe(400);
       const json = (await res.json()) as ApiError;
       expect(json.error.param).toBe("stream_options.include_usage");
+    });
+
+    it("rejects non-object stream_options when stream: true", async () => {
+      const invalidStreamOptions = ["true", 123, []];
+      for (const stream_options of invalidStreamOptions) {
+        const req = createValidChatRequest({
+          stream: true,
+          stream_options: stream_options as unknown as StreamOptions,
+        });
+        const res = await postChat(req);
+        expect(res.status).toBe(400);
+        const json = (await res.json()) as ApiError;
+        expect(json.error.param).toBe("stream_options");
+      }
     });
   });
 
