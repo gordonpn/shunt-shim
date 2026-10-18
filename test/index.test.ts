@@ -627,6 +627,15 @@ describe("Gateway HTTP Entrypoint", () => {
       ).toThrow(
         "Disallowed PRIMARY_MODEL configuration: llama-3.3-70b-versatile",
       );
+
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          PRIMARY_MODEL: "openai/gpt-oss-120b",
+        }),
+      ).toThrow("Disallowed PRIMARY_MODEL configuration: openai/gpt-oss-120b");
     });
 
     it("throws explicit error when FALLBACK_MODEL is disallowed", () => {

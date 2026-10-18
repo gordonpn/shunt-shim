@@ -8,10 +8,7 @@ export interface GatewayEnv {
   FALLBACK_MODEL?: string;
 }
 
-export const ALLOWED_PRIMARY_MODELS = [
-  "qwen/qwen3.8-27b",
-  "openai/gpt-oss-120b",
-] as const;
+export const ALLOWED_PRIMARY_MODELS = ["qwen/qwen3.8-27b"] as const;
 
 export const ALLOWED_FALLBACK_MODELS = ["gemini-2.5-flash-lite"] as const;
 
