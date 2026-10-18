@@ -144,6 +144,25 @@ export const authMiddleware: MiddlewareHandler<{
   return await next();
 };
 
+export const envValidationMiddleware: MiddlewareHandler<{
+  Bindings: GatewayEnv;
+}> = async (c, next) => {
+  try {
+    validateEnvironment(c.env);
+  } catch {
+    return c.json(
+      createErrorResponse(
+        "Internal server configuration error",
+        "internal_error",
+        "internal_error",
+      ),
+      500,
+    );
+  }
+
+  return await next();
+};
+
 export const app = new Hono<{ Bindings: GatewayEnv }>();
 
 app.get("/", (c) => {
@@ -154,7 +173,7 @@ app.get("/health", (c) => {
   return c.json({ status: "ok", service: "shunt-shim" });
 });
 
-app.get("/v1/models", authMiddleware, (c) => {
+app.get("/v1/models", authMiddleware, envValidationMiddleware, (c) => {
   return c.json({
     object: "list",
     data: [
@@ -294,8 +313,18 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
   });
 };
 
-app.post("/v1/chat/completions", authMiddleware, handleChatCompletions);
-app.post("/chat/completions", authMiddleware, handleChatCompletions);
+app.post(
+  "/v1/chat/completions",
+  authMiddleware,
+  envValidationMiddleware,
+  handleChatCompletions,
+);
+app.post(
+  "/chat/completions",
+  authMiddleware,
+  envValidationMiddleware,
+  handleChatCompletions,
+);
 
 app.on(
   ["GET", "PUT", "DELETE", "PATCH"],

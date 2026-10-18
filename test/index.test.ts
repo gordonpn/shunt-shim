@@ -640,20 +640,97 @@ describe("Gateway HTTP Entrypoint", () => {
       ).toThrow("Disallowed FALLBACK_MODEL configuration: gemini-1.5-pro");
     });
 
-    it("ensures error messages never leak secret values", () => {
+    it("ensures error messages never leak secret values across validation cases", () => {
       const privateSecret = "super-secret-key-that-must-not-leak";
-      try {
-        validateEnvironment({
-          GATEWAY_TOKENS: privateSecret,
+      const cases = [
+        {
+          env: {
+            GATEWAY_TOKENS: privateSecret,
+            GROQ_API_KEY: "groq-key",
+          },
+          expectedError: "Missing required environment secret: GEMINI_API_KEY",
+        },
+        {
+          env: {
+            GATEWAY_TOKENS: privateSecret,
+            GROQ_API_KEY: "groq-key",
+            GEMINI_API_KEY: "gemini-key",
+            PRIMARY_MODEL: "disallowed-primary",
+          },
+          expectedError:
+            "Disallowed PRIMARY_MODEL configuration: disallowed-primary",
+        },
+      ];
+
+      for (const testCase of cases) {
+        let thrownError: Error | undefined;
+        expect(() => {
+          try {
+            validateEnvironment(testCase.env);
+          } catch (err: unknown) {
+            if (err instanceof Error) {
+              thrownError = err;
+            }
+            throw err;
+          }
+        }).toThrow(testCase.expectedError);
+
+        expect(thrownError).toBeDefined();
+        expect(thrownError?.message).not.toContain(privateSecret);
+      }
+    });
+
+    it("returns 500 when environment configuration is invalid for authenticated requests", async () => {
+      const invalidEnvs = [
+        {
+          GATEWAY_TOKENS: "test-token-12345",
+        },
+        {
+          GATEWAY_TOKENS: "test-token-12345",
           GROQ_API_KEY: "groq-key",
-          PRIMARY_MODEL: "disallowed-primary",
-        });
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        expect(message).not.toContain(privateSecret);
-        expect(message).toContain(
-          "Missing required environment secret: GEMINI_API_KEY",
+          GEMINI_API_KEY: "gemini-key",
+          PRIMARY_MODEL: "invalid-primary",
+        },
+      ];
+
+      for (const env of invalidEnvs) {
+        const resModels = await app.request(
+          "/v1/models",
+          {
+            headers: {
+              Authorization: "Bearer test-token-12345",
+            },
+          },
+          env,
         );
+        expect(resModels.status).toBe(500);
+        const bodyModels = (await resModels.json()) as {
+          error: { code: string; type: string; message: string };
+        };
+        expect(bodyModels.error.code).toBe("internal_error");
+        expect(bodyModels.error.type).toBe("internal_error");
+
+        const resChat = await app.request(
+          "/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer test-token-12345",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "fast",
+              messages: [{ role: "user", content: "hi" }],
+            }),
+          },
+          env,
+        );
+        expect(resChat.status).toBe(500);
+        const bodyChat = (await resChat.json()) as {
+          error: { code: string; type: string };
+        };
+        expect(bodyChat.error.code).toBe("internal_error");
+        expect(bodyChat.error.type).toBe("internal_error");
       }
     });
   });
