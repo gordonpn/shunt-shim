@@ -26,7 +26,6 @@ export {
   type ValidatedFunctionCall,
   type ValidatedFunctionDeclaration,
   type ValidatedMessage,
-  type ValidatedStreamOptions,
   type ValidatedTool,
   type ValidatedToolCall,
   type ValidatedToolChoice,
@@ -267,53 +266,7 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
     return c.json(validation.error, validation.status);
   }
 
-  const body = validation.data;
-  const completionId = `chatcmpl-${crypto.randomUUID()}`;
-  const created = Math.floor(Date.now() / 1000);
-
-  if (body.stream) {
-    const chunk = {
-      id: completionId,
-      object: "chat.completion.chunk",
-      created,
-      model: "fast",
-      choices: [
-        {
-          index: 0,
-          delta: {
-            role: "assistant",
-            content: "shunt-shim gateway bootstrap",
-          },
-          finish_reason: null,
-        },
-      ],
-    };
-    const terminalChunk = {
-      id: completionId,
-      object: "chat.completion.chunk",
-      created,
-      model: "fast",
-      choices: [
-        {
-          index: 0,
-          delta: {},
-          finish_reason: "stop",
-        },
-      ],
-    };
-    const sseData = `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(terminalChunk)}\n\ndata: [DONE]\n\n`;
-
-    return new Response(sseData, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
-  }
-
-  const upstreamResult = await forwardChatCompletion(body, c.env);
+  const upstreamResult = await forwardChatCompletion(validation.data, c.env);
   if (!upstreamResult.ok) {
     return c.json(upstreamResult.error, upstreamResult.status);
   }
