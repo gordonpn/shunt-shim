@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ApiError } from "../src/errors.js";
 import {
   ALLOWED_FALLBACK_MODELS,
   ALLOWED_PRIMARY_MODELS,
@@ -542,7 +543,7 @@ describe("Gateway HTTP Entrypoint", () => {
       expect(body1.id).not.toBe(body2.id);
     });
 
-    it("streams incremental SSE chunks when stream: true", async () => {
+    it("rejects streaming requests with HTTP 400 unsupported_parameter", async () => {
       const res = await app.request(
         "/v1/chat/completions",
         {
@@ -560,12 +561,12 @@ describe("Gateway HTTP Entrypoint", () => {
         mockEnv,
       );
 
-      expect(res.status).toBe(200);
-      expect(res.headers.get("Content-Type")).toContain("text/event-stream");
-      const text = await res.text();
-      expect(text).toContain("chat.completion.chunk");
-      expect(text).toContain("shunt-shim gateway bootstrap");
-      expect(text).toContain("data: [DONE]");
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as ApiError;
+      expect(json.error.type).toBe("invalid_request_error");
+      expect(json.error.code).toBe("unsupported_parameter");
+      expect(json.error.param).toBe("stream");
+      expect(json.error.message).toContain("Streaming is not supported");
     });
   });
 

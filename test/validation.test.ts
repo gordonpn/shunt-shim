@@ -1033,66 +1033,52 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       }
     });
 
-    it("rejects non-null stream_options when stream is false or omitted", async () => {
-      const reqOmittedStream = createValidChatRequest({
-        stream_options: { include_usage: true },
-      });
-      const res1 = await postChat(reqOmittedStream);
-      expect(res1.status).toBe(400);
-      const json1 = (await res1.json()) as ApiError;
-      expect(json1.error.param).toBe("stream_options");
-
-      const reqFalseStream = createValidChatRequest({
-        stream: false,
-        stream_options: { include_usage: true },
-      });
-      const res2 = await postChat(reqFalseStream);
-      expect(res2.status).toBe(400);
-    });
-
-    it("accepts valid stream and stream_options when stream: true", async () => {
-      const validStreamRequests = [
-        createValidChatRequest({ stream: true }),
-        createValidChatRequest({ stream: true, stream_options: null }),
-        createValidChatRequest({
-          stream: true,
-          stream_options: { include_usage: true },
-        }),
-        createValidChatRequest({
-          stream: true,
-          stream_options: { include_usage: false },
-        }),
-      ];
-
-      for (const req of validStreamRequests) {
-        const res = await postChat(req);
-        expect(res.status).toBe(200);
-      }
-    });
-
-    it("rejects non-boolean stream_options.include_usage when stream: true", async () => {
-      const req = createValidChatRequest({
-        stream: true,
-        stream_options: { include_usage: "yes" },
-      });
+    it("rejects stream: true with HTTP 400 unsupported_parameter", async () => {
+      const req = createValidChatRequest({ stream: true });
       const res = await postChat(req);
       expect(res.status).toBe(400);
       const json = (await res.json()) as ApiError;
-      expect(json.error.param).toBe("stream_options.include_usage");
+      expect(json.error.type).toBe("invalid_request_error");
+      expect(json.error.code).toBe("unsupported_parameter");
+      expect(json.error.param).toBe("stream");
+      expect(json.error.message).toBe(
+        "Streaming is not supported by this gateway. Please omit 'stream' or set 'stream': false.",
+      );
     });
 
-    it("rejects non-object stream_options when stream: true", async () => {
-      const invalidStreamOptions = ["true", 123, []];
-      for (const stream_options of invalidStreamOptions) {
+    it("rejects stream_options with HTTP 400 unsupported_parameter", async () => {
+      const optionsVariants = [
+        { include_usage: true },
+        { include_usage: false },
+        {},
+        null,
+        "invalid",
+        123,
+      ];
+      for (const stream_options of optionsVariants) {
         const req = createValidChatRequest({
-          stream: true,
           stream_options: stream_options as unknown as StreamOptions,
         });
         const res = await postChat(req);
         expect(res.status).toBe(400);
         const json = (await res.json()) as ApiError;
+        expect(json.error.type).toBe("invalid_request_error");
+        expect(json.error.code).toBe("unsupported_parameter");
         expect(json.error.param).toBe("stream_options");
+        expect(json.error.message).toBe(
+          "stream_options is not supported by this gateway.",
+        );
       }
+    });
+
+    it("accepts requests when stream is explicitly false or omitted", async () => {
+      const reqFalse = createValidChatRequest({ stream: false });
+      const resFalse = await postChat(reqFalse);
+      expect(resFalse.status).toBe(200);
+
+      const reqOmitted = createValidChatRequest();
+      const resOmitted = await postChat(reqOmitted);
+      expect(resOmitted.status).toBe(200);
     });
   });
 
