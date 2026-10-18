@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-gemini-text-001",
+  "object": "chat.completion",
+  "created": 1712000000,
+  "model": "gemini-2.5-flash-lite",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "pong"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 4,
+    "total_tokens": 18
+  }
+}

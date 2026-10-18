@@ -1,0 +1,39 @@
+{
+  "id": "chatcmpl-gemini-multi-001",
+  "object": "chat.completion",
+  "created": 1712000000,
+  "model": "gemini-2.5-flash-lite",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "function-call-gemini-multi-001",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\":\"README.md\"}"
+            }
+          },
+          {
+            "id": "function-call-gemini-multi-002",
+            "type": "function",
+            "function": {
+              "name": "check_status",
+              "arguments": "{\"verbose\":true}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 58,
+    "completion_tokens": 30,
+    "total_tokens": 88
+  }
+}

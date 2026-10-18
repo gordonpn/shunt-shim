@@ -31,7 +31,12 @@ export interface GatewayEnv {
   GROQ_API_KEY?: string;
   PRIMARY_MODEL?: string;
   FALLBACK_MODEL?: string;
+  PRIMARY_PROVIDER?: "groq" | "gemini";
+  GROQ_BASE_URL?: string;
+  GEMINI_BASE_URL?: string;
 }
+
+export const ALLOWED_PRIMARY_PROVIDERS = ["groq", "gemini"] as const;
 
 export const ALLOWED_PRIMARY_MODELS = ["qwen/qwen3.8-27b"] as const;
 
@@ -77,6 +82,17 @@ export function validateEnvironment(env: GatewayEnv): void {
     if (!isAllowedFallback) {
       throw new Error(
         `Disallowed FALLBACK_MODEL configuration: ${env.FALLBACK_MODEL}`,
+      );
+    }
+  }
+
+  if (env.PRIMARY_PROVIDER !== undefined) {
+    const isAllowedProvider = (
+      ALLOWED_PRIMARY_PROVIDERS as readonly string[]
+    ).includes(env.PRIMARY_PROVIDER);
+    if (!isAllowedProvider) {
+      throw new Error(
+        `Disallowed PRIMARY_PROVIDER configuration: ${env.PRIMARY_PROVIDER}`,
       );
     }
   }

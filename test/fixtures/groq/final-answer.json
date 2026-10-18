@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-groq-final-001",
+  "object": "chat.completion",
+  "created": 1712000005,
+  "model": "qwen/qwen3.8-27b",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The file diff has been inspected successfully."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 75,
+    "completion_tokens": 12,
+    "total_tokens": 87
+  }
+}

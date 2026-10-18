@@ -1,0 +1,569 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { app, type GatewayEnv } from "../src/index.js";
+import {
+  createMultiTestToolDeclarations,
+  createTestToolDeclaration,
+  geminiFixtures,
+  groqFixtures,
+} from "./fixtures/factories.js";
+
+function requireDefined<T>(
+  val: T | undefined | null,
+  message = "Expected value to be defined",
+): T {
+  if (val === undefined || val === null) {
+    throw new Error(message);
+  }
+  return val;
+}
+
+const mockEnv: GatewayEnv = {
+  GATEWAY_TOKENS: "test-gateway-token-12345",
+  GROQ_API_KEY: "test-groq-key-67890",
+  GEMINI_API_KEY: "test-gemini-key-54321",
+};
+
+describe("JSON Tool Cycle Specification (Subtask #22 / Story #20)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const postChat = async (
+    payload: unknown,
+    env: GatewayEnv = mockEnv,
+    authHeader = "Bearer test-gateway-token-12345",
+  ) => {
+    return await app.request(
+      "/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/json",
+        },
+        body: typeof payload === "string" ? payload : JSON.stringify(payload),
+      },
+      env,
+    );
+  };
+
+  describe("Groq Provider JSON Tool Cycle", () => {
+    it("handles initial tool call response from Groq with tool_calls finish reason", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(groqFixtures.toolCall), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const requestPayload = {
+        model: "fast",
+        messages: [
+          { role: "user", content: "Show me the diff in src/index.ts" },
+        ],
+        tools: [createTestToolDeclaration()],
+        tool_choice: "auto",
+      };
+
+      const res = await postChat(requestPayload);
+      expect(res.status).toBe(200);
+
+      const json = (await res.json()) as typeof groqFixtures.toolCall;
+      expect(json.object).toBe("chat.completion");
+      expect(json.model).toBe("fast");
+      const choice = requireDefined(json.choices[0]);
+      expect(choice.finish_reason).toBe("tool_calls");
+      expect(choice.message.role).toBe("assistant");
+      expect(choice.message.content).toBeNull();
+      const toolCalls = requireDefined(choice.message.tool_calls);
+      expect(toolCalls).toHaveLength(1);
+      expect(toolCalls[0]).toEqual({
+        id: "call_groq_single_001",
+        type: "function",
+        function: {
+          name: "get_file_diff",
+          arguments: '{"file":"src/index.ts"}',
+        },
+      });
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const call = requireDefined(fetchSpy.mock.calls[0]);
+      const [calledUrl, calledInit] = call;
+      expect(calledUrl.toString()).toContain("api.groq.com");
+      const headers = new Headers(calledInit?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer test-groq-key-67890");
+    });
+
+    it("handles multi-tool simultaneous calls in a single Groq completion turn", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(groqFixtures.multiToolCall), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const requestPayload = {
+        model: "fast",
+        messages: [
+          { role: "user", content: "Read README and check repository status." },
+        ],
+        tools: createMultiTestToolDeclarations(),
+        tool_choice: "required",
+      };
+
+      const res = await postChat(requestPayload);
+      expect(res.status).toBe(200);
+
+      const json = (await res.json()) as typeof groqFixtures.multiToolCall;
+      const choice = requireDefined(json.choices[0]);
+      expect(choice.finish_reason).toBe("tool_calls");
+      const toolCalls = requireDefined(choice.message.tool_calls);
+      expect(toolCalls).toHaveLength(2);
+      expect(requireDefined(toolCalls[0]).id).toBe("call_groq_multi_001");
+      expect(requireDefined(toolCalls[1]).id).toBe("call_groq_multi_002");
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it("completes full tool round trip with tool results and final answer on Groq", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(groqFixtures.finalAnswer), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const toolCyclePayload = {
+        model: "fast",
+        messages: [
+          { role: "user", content: "Show me the diff in src/index.ts" },
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_groq_single_001",
+                type: "function",
+                function: {
+                  name: "get_file_diff",
+                  arguments: '{"file":"src/index.ts"}',
+                },
+              },
+            ],
+          },
+          {
+            role: "tool",
+            tool_call_id: "call_groq_single_001",
+            content: "diff --git a/src/index.ts b/src/index.ts...",
+          },
+        ],
+        tools: [createTestToolDeclaration()],
+      };
+
+      const res = await postChat(toolCyclePayload);
+      expect(res.status).toBe(200);
+
+      const json = (await res.json()) as typeof groqFixtures.finalAnswer;
+      const choice = requireDefined(json.choices[0]);
+      expect(choice.finish_reason).toBe("stop");
+      expect(choice.message.content).toBe(
+        "The file diff has been inspected successfully.",
+      );
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const call = requireDefined(fetchSpy.mock.calls[0]);
+      const calledBody = JSON.parse(call[1]?.body as string) as {
+        model: string;
+        messages: unknown[];
+      };
+      expect(calledBody.model).toBe("qwen/qwen3.8-27b");
+      expect(calledBody.messages).toHaveLength(3);
+    });
+  });
+
+  describe("Gemini Provider JSON Tool Cycle", () => {
+    const geminiEnv: GatewayEnv = {
+      ...mockEnv,
+      PRIMARY_PROVIDER: "gemini",
+    };
+
+    it("handles initial tool call response from Gemini with tool_calls finish reason", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(geminiFixtures.toolCall), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const requestPayload = {
+        model: "fast",
+        messages: [
+          { role: "user", content: "Show me the diff in src/index.ts" },
+        ],
+        tools: [createTestToolDeclaration()],
+        tool_choice: "auto",
+      };
+
+      const res = await postChat(requestPayload, geminiEnv);
+      expect(res.status).toBe(200);
+
+      const json = (await res.json()) as typeof geminiFixtures.toolCall;
+      expect(json.object).toBe("chat.completion");
+      expect(json.model).toBe("fast");
+      const choice = requireDefined(json.choices[0]);
+      expect(choice.finish_reason).toBe("tool_calls");
+      expect(choice.message.role).toBe("assistant");
+      expect(choice.message.content).toBeNull();
+      const toolCalls = requireDefined(choice.message.tool_calls);
+      expect(toolCalls[0]).toEqual({
+        id: "function-call-gemini-001",
+        type: "function",
+        function: {
+          name: "get_file_diff",
+          arguments: '{"file":"src/index.ts"}',
+        },
+      });
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const call = requireDefined(fetchSpy.mock.calls[0]);
+      const [calledUrl, calledInit] = call;
+      expect(calledUrl.toString()).toContain(
+        "generativelanguage.googleapis.com",
+      );
+      const headers = new Headers(calledInit?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer test-gemini-key-54321");
+    });
+
+    it("completes full tool round trip with tool results and final answer on Gemini", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(geminiFixtures.finalAnswer), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const toolCyclePayload = {
+        model: "fast",
+        messages: [
+          { role: "user", content: "Show me the diff in src/index.ts" },
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "function-call-gemini-001",
+                type: "function",
+                function: {
+                  name: "get_file_diff",
+                  arguments: '{"file":"src/index.ts"}',
+                },
+              },
+            ],
+          },
+          {
+            role: "tool",
+            tool_call_id: "function-call-gemini-001",
+            content: "diff --git a/src/index.ts b/src/index.ts...",
+          },
+        ],
+        tools: [createTestToolDeclaration()],
+      };
+
+      const res = await postChat(toolCyclePayload, geminiEnv);
+      expect(res.status).toBe(200);
+
+      const json = (await res.json()) as typeof geminiFixtures.finalAnswer;
+      const choice = requireDefined(json.choices[0]);
+      expect(choice.finish_reason).toBe("stop");
+      expect(choice.message.content).toBe(
+        "The file diff has been inspected successfully.",
+      );
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const call = requireDefined(fetchSpy.mock.calls[0]);
+      const calledBody = JSON.parse(call[1]?.body as string) as {
+        model: string;
+      };
+      expect(calledBody.model).toBe("gemini-2.5-flash-lite");
+    });
+  });
+
+  describe("Finish Reason Preservation & Protocol Truthfulness", () => {
+    const validFinishReasons = [
+      "stop",
+      "length",
+      "tool_calls",
+      "content_filter",
+    ];
+
+    for (const finishReason of validFinishReasons) {
+      it(`preserves truthful upstream finish_reason: '${finishReason}'`, async () => {
+        const upstreamResponse = {
+          ...groqFixtures.textCompletion,
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "Text response" },
+              finish_reason: finishReason,
+            },
+          ],
+        };
+
+        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+          new Response(JSON.stringify(upstreamResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+
+        const res = await postChat({
+          model: "fast",
+          messages: [{ role: "user", content: "Hi" }],
+        });
+
+        expect(res.status).toBe(200);
+        const json = (await res.json()) as {
+          choices: Array<{ finish_reason: string }>;
+        };
+        const choice = requireDefined(json.choices[0]);
+        expect(choice.finish_reason).toBe(finishReason);
+      });
+    }
+
+    it("returns HTTP 502 when upstream finish_reason is empty or unrecognized", async () => {
+      const invalidUpstreamResponse = {
+        ...groqFixtures.textCompletion,
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "Text response" },
+            finish_reason: "unexpected_reason_variant",
+          },
+        ],
+      };
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(invalidUpstreamResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hi" }],
+      });
+
+      expect(res.status).toBe(502);
+      const json = (await res.json()) as {
+        error: { code: string; type: string };
+      };
+      expect(json.error.code).toBe("bad_gateway");
+    });
+  });
+
+  describe("Text Block Normalization", () => {
+    it("concatenates valid upstream text block arrays in order", async () => {
+      const textBlockResponse = {
+        ...groqFixtures.textCompletion,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: [
+                { type: "text", text: "Hello " },
+                { type: "text", text: "world!" },
+              ],
+            },
+            finish_reason: "stop",
+          },
+        ],
+      };
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(textBlockResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hi" }],
+      });
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        choices: Array<{ message: { content: string } }>;
+      };
+      const choice = requireDefined(json.choices[0]);
+      expect(choice.message.content).toBe("Hello world!");
+    });
+
+    it("returns HTTP 502 if upstream response contains non-text or malformed content blocks", async () => {
+      const malformedBlockResponse = {
+        ...groqFixtures.textCompletion,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: [
+                { type: "image", image_url: "https://example.com/img.png" },
+              ],
+            },
+            finish_reason: "stop",
+          },
+        ],
+      };
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(malformedBlockResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hi" }],
+      });
+
+      expect(res.status).toBe(502);
+      const json = (await res.json()) as { error: { code: string } };
+      expect(json.error.code).toBe("bad_gateway");
+    });
+  });
+
+  describe("Credential Safety on Upstream Dispatch", () => {
+    it("never reflects gateway bearer tokens or upstream secrets in outgoing requests or headers", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(groqFixtures.textCompletion), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const callerToken = "secret-caller-token-abc-999";
+      const res = await postChat(
+        {
+          model: "fast",
+          messages: [{ role: "user", content: "Hello" }],
+        },
+        {
+          ...mockEnv,
+          GATEWAY_TOKENS: callerToken,
+        },
+        `Bearer ${callerToken}`,
+      );
+
+      expect(res.status).toBe(200);
+      const call = requireDefined(fetchSpy.mock.calls[0]);
+      const [, calledInit] = call;
+      const headers = new Headers(calledInit?.headers);
+
+      // Provider secret sent, caller gateway token omitted
+      expect(headers.get("Authorization")).toBe("Bearer test-groq-key-67890");
+      expect(headers.get("Authorization")).not.toContain(callerToken);
+
+      // Caller token not reflected downstream
+      const bodyText = await res.text();
+      expect(bodyText).not.toContain(callerToken);
+      expect(bodyText).not.toContain("test-groq-key-67890");
+    });
+  });
+
+  describe("Output Limit Normalization", () => {
+    it("dispatches single winning limit to upstream when both max_tokens and max_completion_tokens are provided", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(groqFixtures.textCompletion), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hello" }],
+        max_tokens: 50,
+        max_completion_tokens: 120,
+      });
+
+      expect(res.status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const call = requireDefined(fetchSpy.mock.calls[0]);
+      const calledBody = JSON.parse(call[1]?.body as string) as Record<
+        string,
+        unknown
+      >;
+
+      // max_completion_tokens takes precedence
+      expect(calledBody.max_completion_tokens).toBe(120);
+      expect(calledBody.max_tokens).toBeUndefined();
+    });
+  });
+
+  describe("Upstream Error and Malformed Response Handling", () => {
+    it("maps upstream HTTP 500 error to HTTP 502 bad_gateway", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("Upstream Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hello" }],
+      });
+
+      expect(res.status).toBe(502);
+      const json = (await res.json()) as {
+        error: { code: string; type: string };
+      };
+      expect(json.error.code).toBe("bad_gateway");
+      expect(json.error.type).toBe("invalid_request_error");
+    });
+
+    it("maps malformed upstream JSON to HTTP 502 bad_gateway", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("{ malformed json syntax", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hello" }],
+      });
+
+      expect(res.status).toBe(502);
+      const json = (await res.json()) as { error: { code: string } };
+      expect(json.error.code).toBe("bad_gateway");
+    });
+
+    it("maps upstream response missing choices array to HTTP 502 bad_gateway", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "123", model: "fast" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hello" }],
+      });
+
+      expect(res.status).toBe(502);
+      const json = (await res.json()) as { error: { code: string } };
+      expect(json.error.code).toBe("bad_gateway");
+    });
+  });
+});
