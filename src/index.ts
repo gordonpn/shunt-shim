@@ -268,6 +268,11 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
 
   const upstreamResult = await forwardChatCompletion(validation.data, c.env);
   if (!upstreamResult.ok) {
+    if (upstreamResult.headers) {
+      for (const [key, value] of Object.entries(upstreamResult.headers)) {
+        c.header(key, value);
+      }
+    }
     return c.json(upstreamResult.error, upstreamResult.status);
   }
 
