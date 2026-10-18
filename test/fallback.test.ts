@@ -26,6 +26,18 @@ interface CapturedCall {
   body: Record<string, unknown> | undefined;
 }
 
+function isGroqRequest(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    return (
+      parsed.hostname === "api.groq.com" ||
+      parsed.hostname === "custom-groq.internal"
+    );
+  } catch {
+    return false;
+  }
+}
+
 describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
   let calls: CapturedCall[];
 
@@ -170,7 +182,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
     for (const testCase of eligibleCases) {
       it(`falls back to Gemini and succeeds when Groq fails with ${testCase.description}`, async () => {
         captureFetch(async (url) => {
-          if (url.includes("api.groq.com")) {
+          if (isGroqRequest(url)) {
             return testCase.mockResponse();
           }
           return new Response(JSON.stringify(geminiFixtures.textCompletion), {
@@ -201,7 +213,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
 
     it("falls back to Gemini and preserves tool call structures returned by Gemini", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Rate limited", { status: 429 });
         }
         return new Response(JSON.stringify(geminiFixtures.toolCall), {
@@ -354,7 +366,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
     for (const testCase of ineligibleCases) {
       it(`does not call Gemini fallback when Groq returns ${testCase.description}`, async () => {
         captureFetch(async (url) => {
-          if (url.includes("api.groq.com")) {
+          if (isGroqRequest(url)) {
             return testCase.mockResponse();
           }
           return new Response(JSON.stringify(geminiFixtures.textCompletion), {
@@ -376,7 +388,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
   describe("Exhausted Providers (Both Primary and Fallback Fail)", () => {
     it("returns HTTP 429 when both Groq and Gemini return HTTP 429", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response(
             JSON.stringify({
               error: {
@@ -422,9 +434,26 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
       expect(calls.length).toBe(2);
     });
 
+    it("returns HTTP 429 without Retry-After header when fallback 429 omits Retry-After", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response("Groq rate limited", { status: 429 });
+        }
+        return new Response("Gemini rate limited", { status: 429 });
+      });
+
+      const res = await postChat();
+      const body = (await res.json()) as ApiError;
+
+      expect(res.status).toBe(429);
+      expect(body.error.code).toBe("rate_limit_exceeded");
+      expect(res.headers.get("Retry-After")).toBeNull();
+      expect(calls.length).toBe(2);
+    });
+
     it("returns HTTP 503 when both Groq and Gemini return HTTP 503", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq unavailable", { status: 503 });
         }
         return new Response("Gemini unavailable", { status: 503 });
@@ -440,7 +469,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
 
     it("returns HTTP 429 when Groq returns 503 but fallback Gemini returns 429", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq unavailable", { status: 503 });
         }
         return new Response("Gemini quota exhausted", {
@@ -460,7 +489,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
 
     it("returns HTTP 503 when Groq returns 429 but fallback Gemini returns 503", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq quota exhausted", { status: 429 });
         }
         return new Response("Gemini unavailable", { status: 503 });
@@ -476,7 +505,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
 
     it("returns HTTP 504 / 502 when Groq returns 429 but fallback Gemini times out", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq quota exhausted", { status: 429 });
         }
         throw new TypeError("fetch failed: connection timeout");
@@ -492,7 +521,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
 
     it("returns HTTP 502 when Groq returns 429 and fallback Gemini returns a non-retryable 500 error", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq quota exhausted", { status: 429 });
         }
         return new Response("Gemini internal server error", { status: 500 });
@@ -508,10 +537,29 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
 
     it("returns HTTP 502 when Groq returns 429 and fallback Gemini returns malformed JSON", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq quota exhausted", { status: 429 });
         }
         return new Response("malformed { not json", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      const res = await postChat();
+      const body = (await res.json()) as ApiError;
+
+      expect(res.status).toBe(502);
+      expect(body.error.code).toBe("bad_gateway");
+      expect(calls.length).toBe(2);
+    });
+
+    it("returns HTTP 502 when Groq returns 429 and fallback Gemini returns invalid completion structure", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response("Groq quota exhausted", { status: 429 });
+        }
+        return new Response(JSON.stringify({ id: "invalid-shape" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -529,7 +577,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
   describe("Single Fallback Constraint (At Most One Fallback)", () => {
     it("never makes a third attempt even if fallback fails", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq 429", { status: 429 });
         }
         return new Response("Gemini 503", { status: 503 });
@@ -553,7 +601,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
       const secretGeminiKey = "gemini-super-secret-key-456";
 
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq 429", { status: 429 });
         }
         return new Response("Gemini 503", { status: 503 });
@@ -587,7 +635,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
 
     it("returns HTTP 502 when primary fails with 429 but GEMINI_API_KEY is not configured", async () => {
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Groq 429", { status: 429 });
         }
         return new Response(JSON.stringify(geminiFixtures.textCompletion), {
@@ -625,7 +673,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
       };
 
       captureFetch(async (url) => {
-        if (url.includes("custom-groq.internal")) {
+        if (isGroqRequest(url)) {
           return new Response("Primary 429", { status: 429 });
         }
         return new Response(JSON.stringify(geminiFixtures.textCompletion), {
@@ -661,7 +709,7 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
       };
 
       captureFetch(async (url) => {
-        if (url.includes("api.groq.com")) {
+        if (isGroqRequest(url)) {
           return new Response("Primary 503", { status: 503 });
         }
         return new Response(JSON.stringify(geminiFixtures.textCompletion), {

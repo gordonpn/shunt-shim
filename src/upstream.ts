@@ -38,7 +38,12 @@ export interface NormalizedChatCompletion {
  */
 export type UpstreamCompletionResult =
   | { ok: true; data: NormalizedChatCompletion }
-  | { ok: false; status: 502; error: ApiError };
+  | {
+      ok: false;
+      status: 429 | 502 | 503 | 504;
+      error: ApiError;
+      headers?: Record<string, string>;
+    };
 
 interface ProviderConfig {
   targetUrl: string;
@@ -54,19 +59,7 @@ function trimTrailingSlashes(url: string): string {
   return trimmed;
 }
 
-function resolveProviderConfig(env: GatewayEnv): ProviderConfig {
-  const provider = env.PRIMARY_PROVIDER === "gemini" ? "gemini" : "groq";
-
-  if (provider === "gemini") {
-    const baseUrl = env.GEMINI_BASE_URL
-      ? trimTrailingSlashes(env.GEMINI_BASE_URL)
-      : "https://generativelanguage.googleapis.com/v1beta/openai";
-    const targetUrl = `${baseUrl}/chat/completions`;
-    const model = env.FALLBACK_MODEL ?? "gemini-2.5-flash-lite";
-    const apiKey = env.GEMINI_API_KEY ?? "";
-    return { targetUrl, model, apiKey };
-  }
-
+function resolveGroqConfig(env: GatewayEnv): ProviderConfig {
   const baseUrl = env.GROQ_BASE_URL
     ? trimTrailingSlashes(env.GROQ_BASE_URL)
     : "https://api.groq.com/openai/v1";
@@ -74,6 +67,28 @@ function resolveProviderConfig(env: GatewayEnv): ProviderConfig {
   const model = env.PRIMARY_MODEL ?? "qwen/qwen3.8-27b";
   const apiKey = env.GROQ_API_KEY ?? "";
   return { targetUrl, model, apiKey };
+}
+
+function resolveGeminiConfig(env: GatewayEnv): ProviderConfig {
+  const baseUrl = env.GEMINI_BASE_URL
+    ? trimTrailingSlashes(env.GEMINI_BASE_URL)
+    : "https://generativelanguage.googleapis.com/v1beta/openai";
+  const targetUrl = `${baseUrl}/chat/completions`;
+  const model = env.FALLBACK_MODEL ?? "gemini-2.5-flash-lite";
+  const apiKey = env.GEMINI_API_KEY ?? "";
+  return { targetUrl, model, apiKey };
+}
+
+function resolveProviderConfigs(env: GatewayEnv): {
+  primary: ProviderConfig;
+  fallback: ProviderConfig;
+} {
+  const isGeminiPrimary = env.PRIMARY_PROVIDER === "gemini";
+  const groq = resolveGroqConfig(env);
+  const gemini = resolveGeminiConfig(env);
+  return isGeminiPrimary
+    ? { primary: gemini, fallback: groq }
+    : { primary: groq, fallback: gemini };
 }
 
 interface UpstreamRequestBody {
@@ -311,8 +326,8 @@ export async function forwardChatCompletion(
   req: ValidatedChatCompletionRequest,
   env: GatewayEnv,
 ): Promise<UpstreamCompletionResult> {
-  const config = resolveProviderConfig(env);
-  if (!config.apiKey) {
+  const { primary, fallback } = resolveProviderConfigs(env);
+  if (!primary.apiKey) {
     return {
       ok: false,
       status: 502,
@@ -324,31 +339,65 @@ export async function forwardChatCompletion(
     };
   }
 
-  const body = buildUpstreamRequestBody(req, config.model);
+  const primaryBody = buildUpstreamRequestBody(req, primary.model);
+  let primaryResponse: Response | undefined;
+  let isPrimaryEligibleFailure = false;
 
-  let response: Response;
   try {
-    response = await fetch(config.targetUrl, {
+    primaryResponse = await fetch(primary.targetUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.apiKey}`,
+        Authorization: `Bearer ${primary.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(primaryBody),
     });
   } catch {
+    isPrimaryEligibleFailure = true;
+  }
+
+  if (primaryResponse?.ok) {
+    let rawJson: unknown;
+    try {
+      rawJson = await primaryResponse.json();
+    } catch {
+      return {
+        ok: false,
+        status: 502,
+        error: createErrorResponse(
+          "Upstream provider returned malformed JSON",
+          "invalid_request_error",
+          "bad_gateway",
+        ),
+      };
+    }
+
+    const normalized = normalizeUpstreamResponse(rawJson);
+    if (!normalized) {
+      return {
+        ok: false,
+        status: 502,
+        error: createErrorResponse(
+          "Upstream provider returned an invalid completion payload",
+          "invalid_request_error",
+          "bad_gateway",
+        ),
+      };
+    }
+
     return {
-      ok: false,
-      status: 502,
-      error: createErrorResponse(
-        "Failed to communicate with upstream provider",
-        "invalid_request_error",
-        "bad_gateway",
-      ),
+      ok: true,
+      data: normalized,
     };
   }
 
-  if (!response.ok) {
+  if (primaryResponse) {
+    if (primaryResponse.status === 429 || primaryResponse.status === 503) {
+      isPrimaryEligibleFailure = true;
+    }
+  }
+
+  if (!isPrimaryEligibleFailure) {
     return {
       ok: false,
       status: 502,
@@ -360,36 +409,113 @@ export async function forwardChatCompletion(
     };
   }
 
-  let rawJson: unknown;
-  try {
-    rawJson = await response.json();
-  } catch {
+  if (!fallback.apiKey) {
     return {
       ok: false,
       status: 502,
       error: createErrorResponse(
-        "Upstream provider returned malformed JSON",
+        "Missing fallback upstream API key configuration",
         "invalid_request_error",
         "bad_gateway",
       ),
     };
   }
 
-  const normalized = normalizeUpstreamResponse(rawJson);
-  if (!normalized) {
+  const fallbackBody = buildUpstreamRequestBody(req, fallback.model);
+  let fallbackResponse: Response;
+  try {
+    fallbackResponse = await fetch(fallback.targetUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${fallback.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(fallbackBody),
+    });
+  } catch {
     return {
       ok: false,
-      status: 502,
+      status: 504,
       error: createErrorResponse(
-        "Upstream provider returned an invalid completion payload",
+        "Upstream provider timed out or connection failed",
+        "api_error",
+        "gateway_timeout",
+      ),
+    };
+  }
+
+  if (fallbackResponse.ok) {
+    let rawJson: unknown;
+    try {
+      rawJson = await fallbackResponse.json();
+    } catch {
+      return {
+        ok: false,
+        status: 502,
+        error: createErrorResponse(
+          "Upstream provider returned malformed JSON",
+          "invalid_request_error",
+          "bad_gateway",
+        ),
+      };
+    }
+
+    const normalized = normalizeUpstreamResponse(rawJson);
+    if (!normalized) {
+      return {
+        ok: false,
+        status: 502,
+        error: createErrorResponse(
+          "Upstream provider returned an invalid completion payload",
+          "invalid_request_error",
+          "bad_gateway",
+        ),
+      };
+    }
+
+    return {
+      ok: true,
+      data: normalized,
+    };
+  }
+
+  if (fallbackResponse.status === 429) {
+    const retryAfter = fallbackResponse.headers.get("Retry-After");
+    const headers: Record<string, string> = {};
+    if (retryAfter) {
+      headers["Retry-After"] = retryAfter;
+    }
+    return {
+      ok: false,
+      status: 429,
+      error: createErrorResponse(
+        "All upstream providers exceeded rate limits or quota",
         "invalid_request_error",
-        "bad_gateway",
+        "rate_limit_exceeded",
+      ),
+      headers,
+    };
+  }
+
+  if (fallbackResponse.status === 503) {
+    return {
+      ok: false,
+      status: 503,
+      error: createErrorResponse(
+        "All upstream providers are currently unavailable",
+        "api_error",
+        "service_unavailable",
       ),
     };
   }
 
   return {
-    ok: true,
-    data: normalized,
+    ok: false,
+    status: 502,
+    error: createErrorResponse(
+      "Upstream provider returned an unrecoverable error",
+      "invalid_request_error",
+      "bad_gateway",
+    ),
   };
 }
