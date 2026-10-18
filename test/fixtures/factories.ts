@@ -1,12 +1,11 @@
-import groqFinalAnswer from "./groq/final-answer.json";
-import groqMultiToolCall from "./groq/multi-tool-call.json";
-import groqTextCompletion from "./groq/text-completion.json";
-import groqToolCall from "./groq/tool-call.json";
-
 import geminiFinalAnswer from "./gemini/final-answer.json";
 import geminiMultiToolCall from "./gemini/multi-tool-call.json";
 import geminiTextCompletion from "./gemini/text-completion.json";
 import geminiToolCall from "./gemini/tool-call.json";
+import groqFinalAnswer from "./groq/final-answer.json";
+import groqMultiToolCall from "./groq/multi-tool-call.json";
+import groqTextCompletion from "./groq/text-completion.json";
+import groqToolCall from "./groq/tool-call.json";
 
 export interface FixtureToolCall {
   id: string;

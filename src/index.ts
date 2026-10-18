@@ -12,10 +12,10 @@ export {
 } from "./errors.js";
 
 export {
+  forwardChatCompletion,
   type NormalizedChatCompletion,
   type NormalizedChoice,
   type UpstreamCompletionResult,
-  forwardChatCompletion,
 } from "./upstream.js";
 
 export {
