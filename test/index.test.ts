@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ALLOWED_FALLBACK_MODELS,
   ALLOWED_PRIMARY_MODELS,
@@ -13,6 +13,37 @@ const mockEnv = {
 };
 
 describe("Gateway HTTP Entrypoint", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl-${crypto.randomUUID()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: "qwen/qwen3.8-27b",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "shunt-shim gateway bootstrap",
+              },
+              finish_reason: "stop",
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("responds with 200 on unauthenticated health endpoints", async () => {
     const rootRes = await app.request("/");
     expect(rootRes.status).toBe(200);
@@ -647,6 +678,69 @@ describe("Gateway HTTP Entrypoint", () => {
           FALLBACK_MODEL: "gemini-1.5-pro",
         }),
       ).toThrow("Disallowed FALLBACK_MODEL configuration: gemini-1.5-pro");
+    });
+
+    it("throws explicit error when PRIMARY_PROVIDER is disallowed", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          PRIMARY_PROVIDER: "anthropic" as unknown as "groq",
+        }),
+      ).toThrow("Disallowed PRIMARY_PROVIDER configuration: anthropic");
+    });
+
+    it("accepts valid https URLs for GROQ_BASE_URL and GEMINI_BASE_URL", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GROQ_BASE_URL: "https://custom.groq.example.com/v1",
+          GEMINI_BASE_URL: "https://custom.gemini.example.com/v1",
+        }),
+      ).not.toThrow();
+    });
+
+    it("throws explicit error when GROQ_BASE_URL or GEMINI_BASE_URL is not https", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GROQ_BASE_URL: "http://insecure.groq.example.com/v1",
+        }),
+      ).toThrow("Disallowed GROQ_BASE_URL protocol: must use https");
+
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GEMINI_BASE_URL: "http://insecure.gemini.example.com/v1",
+        }),
+      ).toThrow("Disallowed GEMINI_BASE_URL protocol: must use https");
+    });
+
+    it("throws explicit error when GROQ_BASE_URL or GEMINI_BASE_URL is an invalid URL", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GROQ_BASE_URL: "not a valid url",
+        }),
+      ).toThrow("Invalid GROQ_BASE_URL configuration: not a valid url");
+
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          GEMINI_BASE_URL: "not a valid url",
+        }),
+      ).toThrow("Invalid GEMINI_BASE_URL configuration: not a valid url");
     });
 
     it("ensures error messages never leak secret values across validation cases", () => {

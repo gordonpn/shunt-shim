@@ -1,5 +1,6 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { createErrorResponse } from "./errors.js";
+import { forwardChatCompletion } from "./upstream.js";
 import {
   readRequestBodyWithLimit,
   validateChatCompletionRequest,
@@ -9,6 +10,13 @@ export {
   type ApiError,
   createErrorResponse,
 } from "./errors.js";
+
+export {
+  forwardChatCompletion,
+  type NormalizedChatCompletion,
+  type NormalizedChoice,
+  type UpstreamCompletionResult,
+} from "./upstream.js";
 
 export {
   MAX_BODY_BYTES,
@@ -31,7 +39,12 @@ export interface GatewayEnv {
   GROQ_API_KEY?: string;
   PRIMARY_MODEL?: string;
   FALLBACK_MODEL?: string;
+  PRIMARY_PROVIDER?: "groq" | "gemini";
+  GROQ_BASE_URL?: string;
+  GEMINI_BASE_URL?: string;
 }
+
+export const ALLOWED_PRIMARY_PROVIDERS = ["groq", "gemini"] as const;
 
 export const ALLOWED_PRIMARY_MODELS = ["qwen/qwen3.8-27b"] as const;
 
@@ -78,6 +91,34 @@ export function validateEnvironment(env: GatewayEnv): void {
       throw new Error(
         `Disallowed FALLBACK_MODEL configuration: ${env.FALLBACK_MODEL}`,
       );
+    }
+  }
+
+  if (env.PRIMARY_PROVIDER !== undefined) {
+    const isAllowedProvider = (
+      ALLOWED_PRIMARY_PROVIDERS as readonly string[]
+    ).includes(env.PRIMARY_PROVIDER);
+    if (!isAllowedProvider) {
+      throw new Error(
+        `Disallowed PRIMARY_PROVIDER configuration: ${env.PRIMARY_PROVIDER}`,
+      );
+    }
+  }
+
+  for (const [name, value] of [
+    ["GROQ_BASE_URL", env.GROQ_BASE_URL],
+    ["GEMINI_BASE_URL", env.GEMINI_BASE_URL],
+  ] as const) {
+    if (value !== undefined) {
+      let parsed: URL;
+      try {
+        parsed = new URL(value);
+      } catch {
+        throw new Error(`Invalid ${name} configuration: ${value}`);
+      }
+      if (parsed.protocol !== "https:") {
+        throw new Error(`Disallowed ${name} protocol: must use https`);
+      }
     }
   }
 }
@@ -272,27 +313,12 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
     });
   }
 
-  return c.json({
-    id: completionId,
-    object: "chat.completion",
-    created,
-    model: "fast",
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant",
-          content: "shunt-shim gateway bootstrap",
-        },
-        finish_reason: "stop",
-      },
-    ],
-    usage: {
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 0,
-    },
-  });
+  const upstreamResult = await forwardChatCompletion(body, c.env);
+  if (!upstreamResult.ok) {
+    return c.json(upstreamResult.error, upstreamResult.status);
+  }
+
+  return c.json(upstreamResult.data);
 };
 
 app.post(

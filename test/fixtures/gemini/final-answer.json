@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-gemini-final-001",
+  "object": "chat.completion",
+  "created": 1712000005,
+  "model": "gemini-2.5-flash-lite",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The file diff has been inspected successfully."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 78,
+    "completion_tokens": 14,
+    "total_tokens": 92
+  }
+}

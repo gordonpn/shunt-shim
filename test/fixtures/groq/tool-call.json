@@ -1,0 +1,31 @@
+{
+  "id": "chatcmpl-groq-tool-001",
+  "object": "chat.completion",
+  "created": 1712000000,
+  "model": "qwen/qwen3.8-27b",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_groq_single_001",
+            "type": "function",
+            "function": {
+              "name": "get_file_diff",
+              "arguments": "{\"file\":\"src/index.ts\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 30,
+    "completion_tokens": 15,
+    "total_tokens": 45
+  }
+}
