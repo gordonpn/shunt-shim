@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { app, type GatewayEnv } from "../src/index.js";
+import { app, forwardChatCompletion, type GatewayEnv } from "../src/index.js";
 import {
   createMultiTestToolDeclarations,
   createTestToolDeclaration,
@@ -564,6 +564,210 @@ describe("JSON Tool Cycle Specification (Subtask #22 / Story #20)", () => {
       expect(res.status).toBe(502);
       const json = (await res.json()) as { error: { code: string } };
       expect(json.error.code).toBe("bad_gateway");
+    });
+
+    it("maps upstream fetch network failure to HTTP 502 bad_gateway", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+        new Error("Network connection reset"),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hello" }],
+      });
+
+      expect(res.status).toBe(502);
+      const json = (await res.json()) as { error: { code: string } };
+      expect(json.error.code).toBe("bad_gateway");
+    });
+
+    it("maps upstream primitive JSON response to HTTP 502 bad_gateway", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("null", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hello" }],
+      });
+
+      expect(res.status).toBe(502);
+      const json = (await res.json()) as { error: { code: string } };
+      expect(json.error.code).toBe("bad_gateway");
+    });
+
+    it("maps upstream choices with non-object choice items or messages to HTTP 502 bad_gateway", async () => {
+      const malformedChoicesCases = [
+        { choices: [null] },
+        { choices: [{ finish_reason: "stop", message: null }] },
+        { choices: [{ finish_reason: "stop", message: { content: 123 } }] },
+      ];
+
+      for (const upstreamResponse of malformedChoicesCases) {
+        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+          new Response(JSON.stringify(upstreamResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+
+        const res = await postChat({
+          model: "fast",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+
+        expect(res.status).toBe(502);
+        const json = (await res.json()) as { error: { code: string } };
+        expect(json.error.code).toBe("bad_gateway");
+      }
+    });
+
+    it("preserves optional reasoning_content when returned by upstream", async () => {
+      const reasoningResponse = {
+        ...groqFixtures.textCompletion,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Final text",
+              reasoning_content: "Step-by-step thinking...",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      };
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(reasoningResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hello" }],
+      });
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        choices: Array<{
+          message: { content: string; reasoning_content?: string };
+        }>;
+      };
+      const choice = requireDefined(json.choices[0]);
+      expect(choice.message.reasoning_content).toBe("Step-by-step thinking...");
+    });
+
+    it("respects custom GROQ_BASE_URL and GEMINI_BASE_URL", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify(groqFixtures.textCompletion), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const groqCustomEnv: GatewayEnv = {
+        ...mockEnv,
+        PRIMARY_MODEL: "qwen/qwen3.8-27b",
+        GROQ_BASE_URL: "https://custom.groq.example.com/v1/",
+      };
+
+      await postChat(
+        { model: "fast", messages: [{ role: "user", content: "Hi" }] },
+        groqCustomEnv,
+      );
+
+      const firstCall = requireDefined(fetchSpy.mock.calls[0]);
+      expect(firstCall[0].toString()).toBe(
+        "https://custom.groq.example.com/v1/chat/completions",
+      );
+
+      const geminiCustomEnv: GatewayEnv = {
+        ...mockEnv,
+        PRIMARY_PROVIDER: "gemini",
+        FALLBACK_MODEL: "gemini-2.5-flash-lite",
+        GEMINI_BASE_URL: "https://custom.gemini.example.com/v1/",
+      };
+
+      await postChat(
+        { model: "fast", messages: [{ role: "user", content: "Hi" }] },
+        geminiCustomEnv,
+      );
+
+      const secondCall = requireDefined(fetchSpy.mock.calls[1]);
+      expect(secondCall[0].toString()).toBe(
+        "https://custom.gemini.example.com/v1/chat/completions",
+      );
+    });
+
+    it("synthesizes completion id, created timestamp, and choice index when omitted by upstream", async () => {
+      const minimalResponse = {
+        choices: [
+          {
+            message: { role: "assistant", content: "hello" },
+            finish_reason: "stop",
+          },
+        ],
+      };
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(minimalResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: "Hi" }],
+      });
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        id: string;
+        created: number;
+        choices: Array<{ index: number }>;
+      };
+      expect(json.id).toMatch(/^chatcmpl-/);
+      expect(typeof json.created).toBe("number");
+      expect(json.choices[0]?.index).toBe(0);
+    });
+
+    it("returns 502 bad_gateway when upstream API key is missing", async () => {
+      const groqMissingKeyResult = await forwardChatCompletion(
+        {
+          model: "fast",
+          messages: [{ role: "user", content: "Hi" }],
+          stream: false,
+          extensions: {},
+        },
+        {},
+      );
+      expect(groqMissingKeyResult.ok).toBe(false);
+      if (!groqMissingKeyResult.ok) {
+        expect(groqMissingKeyResult.status).toBe(502);
+        expect(groqMissingKeyResult.error.error.code).toBe("bad_gateway");
+      }
+
+      const geminiMissingKeyResult = await forwardChatCompletion(
+        {
+          model: "fast",
+          messages: [{ role: "user", content: "Hi" }],
+          stream: false,
+          extensions: {},
+        },
+        { PRIMARY_PROVIDER: "gemini" },
+      );
+      expect(geminiMissingKeyResult.ok).toBe(false);
+      if (!geminiMissingKeyResult.ok) {
+        expect(geminiMissingKeyResult.status).toBe(502);
+        expect(geminiMissingKeyResult.error.error.code).toBe("bad_gateway");
+      }
     });
   });
 });

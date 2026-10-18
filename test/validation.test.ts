@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type ApiError,
   app,
@@ -107,6 +107,37 @@ async function postChat(
 }
 
 describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl-${crypto.randomUUID()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: "qwen/qwen3.8-27b",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "validation ok",
+              },
+              finish_reason: "stop",
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe("Endpoint Path Parity", () => {
     it("executes identical validation across /v1/chat/completions and /chat/completions", async () => {
       const invalidPayload = { model: "unknown-alias" };

@@ -1,5 +1,6 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { createErrorResponse } from "./errors.js";
+import { forwardChatCompletion } from "./upstream.js";
 import {
   readRequestBodyWithLimit,
   validateChatCompletionRequest,
@@ -9,6 +10,13 @@ export {
   type ApiError,
   createErrorResponse,
 } from "./errors.js";
+
+export {
+  type NormalizedChatCompletion,
+  type NormalizedChoice,
+  type UpstreamCompletionResult,
+  forwardChatCompletion,
+} from "./upstream.js";
 
 export {
   MAX_BODY_BYTES,
@@ -288,27 +296,12 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
     });
   }
 
-  return c.json({
-    id: completionId,
-    object: "chat.completion",
-    created,
-    model: "fast",
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant",
-          content: "shunt-shim gateway bootstrap",
-        },
-        finish_reason: "stop",
-      },
-    ],
-    usage: {
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 0,
-    },
-  });
+  const upstreamResult = await forwardChatCompletion(body, c.env);
+  if (!upstreamResult.ok) {
+    return c.json(upstreamResult.error, upstreamResult.status);
+  }
+
+  return c.json(upstreamResult.data);
 };
 
 app.post(

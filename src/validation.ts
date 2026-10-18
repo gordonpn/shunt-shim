@@ -150,6 +150,7 @@ export interface ValidatedChatCompletionRequest {
   tool_choice?: ValidatedToolChoice | undefined;
   temperature?: number | undefined;
   max_tokens?: number | undefined;
+  max_completion_tokens?: number | undefined;
   stream: boolean;
   stream_options?: ValidatedStreamOptions | undefined;
   extensions: Record<string, unknown>;
@@ -849,6 +850,19 @@ export function validateChatCompletionRequest(
     }
   }
 
+  const rawMaxCompletionTokens = record.max_completion_tokens as
+    | number
+    | undefined;
+  const rawMaxTokens = record.max_tokens as number | undefined;
+
+  let resolvedMaxCompletionTokens: number | undefined;
+  let resolvedMaxTokens: number | undefined;
+  if (rawMaxCompletionTokens !== undefined) {
+    resolvedMaxCompletionTokens = rawMaxCompletionTokens;
+  } else if (rawMaxTokens !== undefined) {
+    resolvedMaxTokens = rawMaxTokens;
+  }
+
   return {
     ok: true,
     data: {
@@ -857,7 +871,8 @@ export function validateChatCompletionRequest(
       tools: validatedTools,
       tool_choice: validatedToolChoice,
       temperature: record.temperature as number | undefined,
-      max_tokens: winningMaxTokens,
+      max_tokens: resolvedMaxTokens,
+      max_completion_tokens: resolvedMaxCompletionTokens,
       stream: isStream,
       stream_options: validatedStreamOptions,
       extensions,

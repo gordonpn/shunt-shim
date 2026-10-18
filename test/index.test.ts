@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ALLOWED_FALLBACK_MODELS,
   ALLOWED_PRIMARY_MODELS,
@@ -13,6 +13,37 @@ const mockEnv = {
 };
 
 describe("Gateway HTTP Entrypoint", () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          id: `chatcmpl-${crypto.randomUUID()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: "qwen/qwen3.8-27b",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "shunt-shim gateway bootstrap",
+              },
+              finish_reason: "stop",
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("responds with 200 on unauthenticated health endpoints", async () => {
     const rootRes = await app.request("/");
     expect(rootRes.status).toBe(200);
@@ -647,6 +678,17 @@ describe("Gateway HTTP Entrypoint", () => {
           FALLBACK_MODEL: "gemini-1.5-pro",
         }),
       ).toThrow("Disallowed FALLBACK_MODEL configuration: gemini-1.5-pro");
+    });
+
+    it("throws explicit error when PRIMARY_PROVIDER is disallowed", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "token-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+          PRIMARY_PROVIDER: "anthropic" as unknown as "groq",
+        }),
+      ).toThrow("Disallowed PRIMARY_PROVIDER configuration: anthropic");
     });
 
     it("ensures error messages never leak secret values across validation cases", () => {
