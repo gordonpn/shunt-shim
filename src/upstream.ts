@@ -46,12 +46,20 @@ interface ProviderConfig {
   apiKey: string;
 }
 
+function trimTrailingSlashes(url: string): string {
+  let trimmed = url.trim();
+  while (trimmed.endsWith("/")) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return trimmed;
+}
+
 function resolveProviderConfig(env: GatewayEnv): ProviderConfig {
   const provider = env.PRIMARY_PROVIDER === "gemini" ? "gemini" : "groq";
 
   if (provider === "gemini") {
     const baseUrl = env.GEMINI_BASE_URL
-      ? env.GEMINI_BASE_URL.trim().replace(/\/+$/, "")
+      ? trimTrailingSlashes(env.GEMINI_BASE_URL)
       : "https://generativelanguage.googleapis.com/v1beta/openai";
     const targetUrl = `${baseUrl}/chat/completions`;
     const model = env.FALLBACK_MODEL ?? "gemini-2.5-flash-lite";
@@ -60,7 +68,7 @@ function resolveProviderConfig(env: GatewayEnv): ProviderConfig {
   }
 
   const baseUrl = env.GROQ_BASE_URL
-    ? env.GROQ_BASE_URL.trim().replace(/\/+$/, "")
+    ? trimTrailingSlashes(env.GROQ_BASE_URL)
     : "https://api.groq.com/openai/v1";
   const targetUrl = `${baseUrl}/chat/completions`;
   const model = env.PRIMARY_MODEL ?? "qwen/qwen3.8-27b";
