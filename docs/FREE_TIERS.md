@@ -2,7 +2,7 @@
 
 This document catalogs permanent, always-free cloud infrastructure allowances and large language model (LLM) developer tiers. It distinguishes perpetual quotas from temporary promotional trials and documents operational constraints, idle policies, and failover patterns.
 
-Verified against provider documentation as of October 12, 2026.
+Verified against provider documentation as of October 20, 2026.
 
 ## 1. Raw Compute and Virtual Machines (IaaS)
 
@@ -49,23 +49,28 @@ Free API access divides across three distinct economic models:
 
 1. Permanent Free Tiers: Ongoing usage allowances that renew on daily or monthly schedules (such as Google Gemini, GroqCloud, and Cloudflare Workers AI).
 2. Recurring API Credits: A recurring dollar balance renewed monthly that can be spent across eligible models (such as Vercel AI Gateway providing $5/month, or Hugging Face providing $0.10/month).
-3. One-Time Trial Credits: Initial promotional balances valid for a limited window (such as Cerebras providing $5 for 30 days). These support initial evaluation but do not form sustainable free infrastructure.
+3. One-Time Trial Credits: Initial promotional balances valid for a limited window (such as Cerebras providing $5 for 30 days, requiring payment method). These support initial evaluation but do not form sustainable free infrastructure.
 
 ### Free LLM API Comparison Matrix
 
-Verified against provider documentation as of October 12, 2026.
+Verified against provider documentation as of October 20, 2026.
 
 | Provider | Free API Allowance | Models and Capabilities | Best Suited For | Primary Constraints and Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | Google Gemini API | Free input/output tokens on eligible models; rate-limited | Gemini 2.5 / 3.8 Flash and Flash-Lite | General-purpose applications, 1M-token large context | Prompts submitted under the free tier may be reviewed by human annotators to train Google models. Consumer Google AI Pro subscriptions do not increase Developer API allowances. |
-| GroqCloud | Up to 1,000 requests/day, 30 RPM, 8,000 TPM, 200,000 TPD | GPT-OSS 120B/20B, Qwen, Llama 3.3 | Low-latency inference and real-time agent loops | Strict sliding per-minute token buckets (TPM) can throttle high-context coding requests before daily request limits bind. |
-| OpenRouter | 50 free requests/day (free tier); 1,000 requests/day ($10+ credits) | 25+ free models (DeepSeek R1, Llama 3.3 70B, Qwen 2.5) | Multi-provider model experimentation | Shared community endpoints can experience queue latency. Accounts with $10+ purchased credits expand daily free-model volume to 1,000 requests/day, but credits may expire after one year. |
+| GroqCloud | Up to 1,000 requests/day, 200,000 tokens/day, rate-limited per minute | GPT-OSS 120B/20B, Qwen 3.8 27B, Llama 3.3 | Low-latency inference and real-time agent loops | Strict sliding per-minute token buckets (TPM) can throttle high-context coding requests before daily request limits bind. |
+| OpenRouter | 50 free requests/day, 20 requests/minute (free tier); 1,000 requests/day ($10+ credits) | NVIDIA Nemotron 3 Ultra (1M), Poolside Laguna S 2.1 (262k), Cohere North Mini Code (256k), MiniMax M3.1 Flash (1M), Nemotron 3.5 Lightning (1M) | Broadest open-weight selection, coding agents, second-opinion review | Shared community endpoints can experience queue latency. Some upstream free-model providers explicitly allow training on prompts and outputs. Purchased credits ($10+) expand daily free-model cap to 1,000 requests/day. |
 | Cloudflare Workers AI | 10,000 Neurons/day | Gemma, GLM, Nemotron, Llama 3.3, DeepSeek Distill | Serverless edge workflows and microservices | Neurons measure compute units rather than raw tokens. Context windows are typically smaller (8k to 128k). Certain resource-heavy models require paid plans. |
+| NVIDIA Build | Free hosted NIM inference for prototyping | NVIDIA Nemotron variants, open community models | Prototyping and direct tool integration via OpenCode | Requires NVIDIA Developer Program account. Offers hosted NIM microservice inference without routing through external proxies. |
 | Vercel AI Gateway | $5/month in recurring credits | Eligible models from multi-provider catalog | Testing commercial and closed-source models | Covers only eligible models in Vercel catalog. Purchasing additional API credits converts the account to paid and terminates the recurring $5/month allowance. |
 | Mistral AI | Free API usage with account-specific limits | Mistral Small, Codestral, Embeddings | European hosting, structured JSON, code completion | Rate-limited to low requests per second (~1 RPS) on free tier. |
-| Hugging Face | $0.10/month in inference credits | Open-source models across various providers | Evaluating specific open checkpoints | Low monthly credit ceiling limits continuous agent loops. |
-| GitHub Models | 15 RPM, 150 RPD per model | GPT-4o, Claude 3.5 Sonnet, o3-mini, Llama 3.3 | Rapid prototyping on frontier models | Playground evaluation only; not rated for production traffic. |
-| Cerebras | $5 one-time trial credit, valid for 30 days | GPT-OSS 120B, Qwen | High-speed inference evaluation | One-time promotion that expires after 30 days rather than a recurring allowance. |
+| Hugging Face | $0.10/month in inference credits | Open-source models across various providers | Evaluating specific open checkpoints | Low monthly credit ceiling ($0.10) limits continuous agent workloads. |
+| Cerebras | $5 one-time trial credit, valid for 30 days (requires payment method) | GPT-OSS 120B, Qwen | High-speed inference evaluation | One-time promotional credit expiring in 30 days, not an ongoing free API allowance. |
+
+### Obsolete and Discontinued Free Tiers
+
+- GitHub Models: Officially retired on July 30, 2026. The playground and inference API were discontinued. GitHub Copilot Free remains available for editor chat and completions, but it is a distinct product and does not provide a general-purpose developer API.
+- Qwen Code OAuth Tier: Discontinued on April 15, 2026. Legacy guides advertising 1,000 free daily requests via OAuth credentials are out of date.
 
 ### Providers Without General Ongoing Free API Tiers
 
@@ -77,11 +82,18 @@ Verified against provider documentation as of October 12, 2026.
 ## 5. Connected Topics and Operational Blind Spots
 
 ### Free-Tier Data Privacy
-Google's free Gemini API terms permit using submitted content to train Google models. Operators must avoid sending private source code, production credentials, or personal identifiable information (PII) through free developer endpoints without reviewing data retention terms. Upgrading Google AI Studio to Pay-As-You-Go disables training while maintaining low token costs.
+Both Google Gemini free API and certain OpenRouter free-model hosting providers explicitly permit using submitted prompts and generated completions to improve and train AI models. Operators and coding agent users must avoid submitting proprietary codebases, production credentials, internal API keys, or sensitive customer data through untrusted free developer endpoints. For sensitive code, consider local self-hosting (Ollama / llama.cpp) or commercial API tiers with explicit zero-data-retention guarantees.
+
+### Coding Agent Integration Matrix (OpenCode, Codex CLI, agy, OCR)
+Coding agents (Codex CLI, agy, OpenCode, and Alibaba Open Code Review) interact with LLM providers through standard OpenAI-compatible endpoints:
+- OpenCode: Directly supports 75+ providers via `/connect` (including OpenRouter, Groq, NVIDIA Build, Gemini, and Ollama). Run headless agent tasks with:
+  `opencode run --model provider/model-id --agent plan "task description"`
+- Alibaba Open Code Review (OCR): Operates as a deterministic PR review gate using local rules or upstream completions.
+- shunt-shim: Acts as an edge-based gateway sitting between coding agents and upstream free tiers, providing rate-limit shielding, automatic failover (Groq to Gemini), and standard OpenAI protocol normalization.
 
 ### Coding Agent Token Dynamics
 Coding agents (such as Aider, OpenCode, Claude Code, and PR-Agent) consume dramatically more tokens than conversational chat interfaces. Every interaction re-sends complete file trees, tool definitions, test outputs, and conversation context. As a result:
-- Restrictive tokens-per-minute (TPM) limits (such as Groq's 8,000 TPM) trigger HTTP 429 throttling long before generous daily request quotas (1,000 RPD) are exhausted.
+- Restrictive tokens-per-minute (TPM) limits (such as Groq's sliding TPM) trigger HTTP 429 throttling long before generous daily request quotas (1,000 RPD) are exhausted.
 - Sliding token buckets require gateways like `shunt-shim` to inspect prompt byte sizes and divert large payloads (>100k tokens) to providers with high token-per-minute headroom (such as Google Gemini Flash).
 
 ### Complementary Local Self-Hosting
@@ -93,8 +105,9 @@ Hardware environments with bare-metal compute (such as home servers or local dev
 | :--- | :--- | :--- |
 | Default Gateway Endpoint | Google Gemini API (free tier) | Multimodal ingestion, 1,000,000-token context window, stable daily reset schedule. |
 | Low-Latency Inference | GroqCloud | Sub-second LPU execution for interactive CLI completions, git commit generators, and short diffs. |
-| Model Diversity | OpenRouter (:free) | Single OpenAI-compatible endpoint multiplexing 25+ open-weight community models. |
+| Model Diversity | OpenRouter (:free) | Single OpenAI-compatible endpoint multiplexing 25+ open-weight community models (Nemotron 3 Ultra, Laguna S 2.1). |
 | Edge Native Pipelines | Cloudflare Workers AI | Co-located inference inside Cloudflare Workers alongside D1 SQL, KV, and R2 storage without managing API keys. |
+| Prototyping & Fast NIM | NVIDIA Build | Free hosted NIM microservice inference for NVIDIA Nemotron variants via OpenCode. |
 | Commercial Model Testing | Vercel AI Gateway | Monthly $5 credit allowance on eligible commercial models without upfront payment. |
 | Paid Emergency Fallback | DeepSeek API | Cost-effective token balance reserved as a last-resort fallback when all free-tier quotas are exhausted. |
 | Self-Hosted Fallback | Local Ollama / llama.cpp | Zero-cost loopback inference on local bare-metal hardware for non-rate-limited offline testing. |
