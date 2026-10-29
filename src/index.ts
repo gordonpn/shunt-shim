@@ -18,6 +18,7 @@ export {
   formatDiagnosticLog,
   getCapturedDiagnostics,
   resetDiagnosticSink,
+  setDiagnosticCapture,
   setDiagnosticSink,
 } from "./diagnostics.js";
 

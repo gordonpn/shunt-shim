@@ -3,6 +3,7 @@ import {
   type DiagnosticRecord,
   getCapturedDiagnostics,
   resetDiagnosticSink,
+  setDiagnosticCapture,
   setDiagnosticSink,
 } from "../src/diagnostics.js";
 import { app, forwardChatCompletion, type GatewayEnv } from "../src/index.js";
@@ -538,7 +539,7 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
       }
     });
 
-    it("uses console.log as default sink when custom sink is not configured", async () => {
+    it("uses console.log as default sink and does not retain records in memory unless opted in", async () => {
       resetDiagnosticSink();
       const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -562,7 +563,17 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
       expect(parsed.provider).toBe("groq");
       expect(parsed.status).toBe(200);
 
-      expect(getCapturedDiagnostics().length).toBeGreaterThan(0);
+      // Verify records are NOT retained by default in memory
+      expect(getCapturedDiagnostics().length).toBe(0);
+
+      // Opt in to in-memory capture
+      setDiagnosticCapture(true);
+      await postChat();
+      expect(getCapturedDiagnostics().length).toBe(1);
+
+      // Disable in-memory capture and verify clearing
+      setDiagnosticCapture(false);
+      expect(getCapturedDiagnostics().length).toBe(0);
     });
 
     it("accepts valid client-provided x-request-id and echoes in response and diagnostics", async () => {

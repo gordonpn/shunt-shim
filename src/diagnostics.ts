@@ -9,7 +9,7 @@ export interface DiagnosticRecord {
   latencyMs: number;
   provider?: "groq" | "gemini";
   model?: string;
-  fallbackReason?: string;
+  fallbackReason?: string | undefined;
   attempts?: number;
 }
 
@@ -30,6 +30,7 @@ export type DiagnosticSink = (
 ) => void;
 
 let activeSink: DiagnosticSink | null = null;
+let captureEnabled = false;
 let capturedRecords: DiagnosticRecord[] = [];
 
 /**
@@ -42,10 +43,24 @@ export function setDiagnosticSink(sink: DiagnosticSink): void {
 }
 
 /**
+ * Enables or disables in-memory diagnostic record retention.
+ * Defaults to false to prevent memory growth in long-running worker isolates.
+ *
+ * @param enabled - Whether to retain emitted records in memory.
+ */
+export function setDiagnosticCapture(enabled: boolean): void {
+  captureEnabled = enabled;
+  if (!enabled) {
+    capturedRecords = [];
+  }
+}
+
+/**
  * Resets the logging sink to default console.log output and clears captured records.
  */
 export function resetDiagnosticSink(): void {
   activeSink = null;
+  captureEnabled = false;
   capturedRecords = [];
 }
 
@@ -81,7 +96,9 @@ export function formatDiagnosticLog(record: DiagnosticRecord): string {
  * @param record - Diagnostic record to emit.
  */
 export function emitDiagnostic(record: DiagnosticRecord): void {
-  capturedRecords.push(record);
+  if (captureEnabled) {
+    capturedRecords.push(record);
+  }
   const jsonString = formatDiagnosticLog(record);
   if (activeSink) {
     activeSink(jsonString, record);
