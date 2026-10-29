@@ -12,6 +12,7 @@ export {
 } from "./errors.js";
 
 export {
+  type ForwardChatCompletionOptions,
   forwardChatCompletion,
   type NormalizedChatCompletion,
   type NormalizedChoice,

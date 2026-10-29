@@ -34,6 +34,15 @@ export interface NormalizedChatCompletion {
 }
 
 /**
+ * Optional execution bounds and cancellation signals for upstream dispatch.
+ */
+export interface ForwardChatCompletionOptions {
+  signal?: AbortSignal;
+  connectTimeoutMs?: number;
+  totalDeadlineMs?: number;
+}
+
+/**
  * Result of an upstream completion dispatch attempt.
  */
 export type UpstreamCompletionResult =
@@ -320,11 +329,13 @@ function normalizeUpstreamResponse(
  *
  * @param req - Validated chat completion request payload.
  * @param env - Gateway environment bindings containing secrets and routing configuration.
+ * @param _options - Optional execution parameters such as abort signals and timeout limits.
  * @returns Result object containing the normalized completion or an API error.
  */
 export async function forwardChatCompletion(
   req: ValidatedChatCompletionRequest,
   env: GatewayEnv,
+  _options?: ForwardChatCompletionOptions,
 ): Promise<UpstreamCompletionResult> {
   const { primary, fallback } = resolveProviderConfigs(env);
   if (!primary.apiKey) {
