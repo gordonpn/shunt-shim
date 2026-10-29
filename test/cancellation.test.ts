@@ -121,6 +121,28 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
   };
 
   describe("Downstream Client Disconnect Propagation", () => {
+    it("returns HTTP 504 gateway_timeout immediately when client signal is already aborted prior to dispatch", async () => {
+      const clientController = new AbortController();
+      clientController.abort();
+
+      captureFetch(() => {
+        throw new Error(
+          "Upstream fetch must not be called when client is already aborted",
+        );
+      });
+
+      const res = await postChatWithSignal(
+        {
+          model: "fast",
+          messages: [{ role: "user", content: "hello" }],
+        },
+        clientController.signal,
+      );
+
+      expect([499, 504]).toContain(res.status);
+      expect(calls.length).toBe(0);
+    });
+
     it("aborts active primary upstream fetch and does not initiate fallback when client disconnects", async () => {
       const clientController = new AbortController();
 
@@ -237,11 +259,22 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
 
   describe("Upstream Connect Timeout (5,000 ms)", () => {
     it("aborts primary attempt and triggers fallback to Gemini when primary hangs beyond connect timeout", async () => {
+      const timeoutMs = 50;
+      let primarySignalLiveAtStart = false;
       captureFetch(async (url, init) => {
         if (isGroqRequest(url)) {
           expect(init?.signal).toBeDefined();
+          primarySignalLiveAtStart = !init?.signal?.aborted;
+          const start = Date.now();
           return new Promise<Response>((_, reject) => {
             init?.signal?.addEventListener("abort", () => {
+              const elapsed = Date.now() - start;
+              if (elapsed < timeoutMs - 15) {
+                reject(
+                  new Error(`Primary aborted prematurely after ${elapsed}ms`),
+                );
+                return;
+              }
               const error = new Error("Connection timeout");
               error.name = "TimeoutError";
               reject(error);
@@ -252,10 +285,11 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
       });
 
       const res = await forwardChatCompletion(createValidRequest(), mockEnv, {
-        connectTimeoutMs: 50,
+        connectTimeoutMs: timeoutMs,
         totalDeadlineMs: 1000,
       });
 
+      expect(primarySignalLiveAtStart).toBe(true);
       expect(res.ok).toBe(true);
       expect(calls.length).toBe(2);
       const firstCall = getCall(calls, 0);
@@ -266,10 +300,24 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
     });
 
     it("aborts fallback attempt and returns HTTP 504 gateway_timeout when both upstreams hang beyond connect timeout", async () => {
-      captureFetch(async (_url, init) => {
+      const timeoutMs = 50;
+      let primarySignalLiveAtStart = false;
+      let fallbackSignalLiveAtStart = false;
+      captureFetch(async (url, init) => {
         expect(init?.signal).toBeDefined();
+        if (isGroqRequest(url)) {
+          primarySignalLiveAtStart = !init?.signal?.aborted;
+        } else {
+          fallbackSignalLiveAtStart = !init?.signal?.aborted;
+        }
+        const start = Date.now();
         return new Promise<Response>((_, reject) => {
           init?.signal?.addEventListener("abort", () => {
+            const elapsed = Date.now() - start;
+            if (elapsed < timeoutMs - 15) {
+              reject(new Error(`Aborted prematurely after ${elapsed}ms`));
+              return;
+            }
             const error = new Error("Connection timeout");
             error.name = "TimeoutError";
             reject(error);
@@ -278,10 +326,12 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
       });
 
       const res = await forwardChatCompletion(createValidRequest(), mockEnv, {
-        connectTimeoutMs: 50,
+        connectTimeoutMs: timeoutMs,
         totalDeadlineMs: 1000,
       });
 
+      expect(primarySignalLiveAtStart).toBe(true);
+      expect(fallbackSignalLiveAtStart).toBe(true);
       expect(res.ok).toBe(false);
       if (!res.ok) {
         expect(res.status).toBe(504);
@@ -297,10 +347,21 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
 
   describe("Total Request Deadline (60,000 ms)", () => {
     it("aborts active dispatch and returns HTTP 504 gateway_timeout when total deadline expires during primary", async () => {
+      const deadlineMs = 50;
+      let signalLiveAtStart = false;
       captureFetch(async (_url, init) => {
         expect(init?.signal).toBeDefined();
+        signalLiveAtStart = !init?.signal?.aborted;
+        const start = Date.now();
         return new Promise<Response>((_, reject) => {
           init?.signal?.addEventListener("abort", () => {
+            const elapsed = Date.now() - start;
+            if (elapsed < deadlineMs - 15) {
+              reject(
+                new Error(`Deadline aborted prematurely after ${elapsed}ms`),
+              );
+              return;
+            }
             const error = new Error("Total deadline exceeded");
             error.name = "TimeoutError";
             reject(error);
@@ -310,9 +371,10 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
 
       const res = await forwardChatCompletion(createValidRequest(), mockEnv, {
         connectTimeoutMs: 1000,
-        totalDeadlineMs: 50,
+        totalDeadlineMs: deadlineMs,
       });
 
+      expect(signalLiveAtStart).toBe(true);
       expect(res.ok).toBe(false);
       if (!res.ok) {
         expect(res.status).toBe(504);
@@ -346,6 +408,39 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
       const firstCall = getCall(calls, 0);
       expect(isGroqRequest(firstCall.url)).toBe(true);
     });
+
+    it("aborts active fallback fetch and returns HTTP 504 gateway_timeout when total deadline expires during fallback", async () => {
+      captureFetch(async (url, init) => {
+        if (isGroqRequest(url)) {
+          return new Response("Groq rate limited", { status: 429 });
+        }
+        expect(init?.signal).toBeDefined();
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const error = new Error("Total deadline exceeded");
+            error.name = "TimeoutError";
+            reject(error);
+          });
+        });
+      });
+
+      const res = await forwardChatCompletion(createValidRequest(), mockEnv, {
+        connectTimeoutMs: 1000,
+        totalDeadlineMs: 50,
+      });
+
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.status).toBe(504);
+        expect(res.error.error.code).toBe("gateway_timeout");
+      }
+      expect(calls.length).toBe(2);
+      const firstCall = getCall(calls, 0);
+      const secondCall = getCall(calls, 1);
+      expect(isGroqRequest(firstCall.url)).toBe(true);
+      expect(isGroqRequest(secondCall.url)).toBe(false);
+      expect(secondCall.signal?.aborted).toBe(true);
+    });
   });
 
   describe("Concurrent Request Isolation", () => {
@@ -363,6 +458,11 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
               error.name = "AbortError";
               throw error;
             }
+            if (sig.aborted) {
+              const error = new Error("Aborted");
+              error.name = "AbortError";
+              throw error;
+            }
             return new Promise<Response>((_, reject) => {
               sig.addEventListener("abort", () => {
                 const error = new Error("Aborted");
@@ -370,6 +470,14 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
                 reject(error);
               });
             });
+          }
+          const sig = init?.signal;
+          if (sig?.aborted) {
+            const error = new Error(
+              "Aborted: request B was unexpectedly aborted",
+            );
+            error.name = "AbortError";
+            throw error;
           }
           return Response.json(groqFixtures.textCompletion);
         }
@@ -398,6 +506,8 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
       expect(resB.status).toBe(200);
       const bodyB = (await resB.json()) as { object: string };
       expect(bodyB.object).toBe("chat.completion");
+      const callB = getCall(calls, 1);
+      expect(callB.signal?.aborted).toBe(false);
     });
   });
 
