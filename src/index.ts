@@ -1,10 +1,25 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { type DiagnosticRecord, emitDiagnostic } from "./diagnostics.js";
 import { createErrorResponse } from "./errors.js";
-import { forwardChatCompletion } from "./upstream.js";
+import {
+  forwardChatCompletion,
+  type UpstreamDiagnosticMetadata,
+} from "./upstream.js";
 import {
   readRequestBodyWithLimit,
   validateChatCompletionRequest,
 } from "./validation.js";
+
+export {
+  DIAGNOSTIC_ALLOWLIST,
+  type DiagnosticRecord,
+  type DiagnosticSink,
+  emitDiagnostic,
+  formatDiagnosticLog,
+  getCapturedDiagnostics,
+  resetDiagnosticSink,
+  setDiagnosticSink,
+} from "./diagnostics.js";
 
 export {
   type ApiError,
@@ -17,6 +32,7 @@ export {
   type NormalizedChatCompletion,
   type NormalizedChoice,
   type UpstreamCompletionResult,
+  type UpstreamDiagnosticMetadata,
 } from "./upstream.js";
 
 export {
@@ -123,9 +139,22 @@ export function validateEnvironment(env: GatewayEnv): void {
   }
 }
 
-export const authMiddleware: MiddlewareHandler<{
+export interface GatewayVariables {
+  requestId: string;
+  diagnostic?: UpstreamDiagnosticMetadata;
+}
+
+export type GatewayContext = Context<{
   Bindings: GatewayEnv;
-}> = async (c, next) => {
+  Variables: GatewayVariables;
+}>;
+
+export type GatewayMiddleware = MiddlewareHandler<{
+  Bindings: GatewayEnv;
+  Variables: GatewayVariables;
+}>;
+
+export const authMiddleware: GatewayMiddleware = async (c, next) => {
   const configuredToken = c.env?.GATEWAY_TOKENS?.trim();
   const authHeader = c.req.header("Authorization");
   const apiKeyHeader = c.req.header("x-api-key");
@@ -187,9 +216,7 @@ export const authMiddleware: MiddlewareHandler<{
   return await next();
 };
 
-export const envValidationMiddleware: MiddlewareHandler<{
-  Bindings: GatewayEnv;
-}> = async (c, next) => {
+export const envValidationMiddleware: GatewayMiddleware = async (c, next) => {
   try {
     validateEnvironment(c.env);
   } catch {
@@ -206,7 +233,53 @@ export const envValidationMiddleware: MiddlewareHandler<{
   return await next();
 };
 
-export const app = new Hono<{ Bindings: GatewayEnv }>();
+export const diagnosticsMiddleware: GatewayMiddleware = async (c, next) => {
+  const startTime = Date.now();
+  const incomingRequestId = c.req.header("x-request-id")?.trim();
+  const requestId =
+    incomingRequestId && /^[a-zA-Z0-9_-]{1,128}$/.test(incomingRequestId)
+      ? incomingRequestId
+      : crypto.randomUUID();
+
+  c.set("requestId", requestId);
+
+  try {
+    await next();
+  } finally {
+    const latencyMs = Math.max(0, Date.now() - startTime);
+    const status = c.res.status;
+    c.res.headers.set("x-request-id", requestId);
+
+    const upstreamDiagnostic = c.get("diagnostic");
+    const record: DiagnosticRecord = {
+      timestamp: new Date().toISOString(),
+      requestId,
+      status,
+      latencyMs,
+      ...(upstreamDiagnostic?.provider !== undefined
+        ? { provider: upstreamDiagnostic.provider }
+        : {}),
+      ...(upstreamDiagnostic?.model !== undefined
+        ? { model: upstreamDiagnostic.model }
+        : {}),
+      ...(upstreamDiagnostic?.fallbackReason !== undefined
+        ? { fallbackReason: upstreamDiagnostic.fallbackReason }
+        : {}),
+      ...(upstreamDiagnostic?.attempts !== undefined
+        ? { attempts: upstreamDiagnostic.attempts }
+        : {}),
+    };
+
+    emitDiagnostic(record);
+  }
+};
+
+export const app = new Hono<{
+  Bindings: GatewayEnv;
+  Variables: GatewayVariables;
+}>();
+
+app.use("*", diagnosticsMiddleware);
 
 app.get("/", (c) => {
   return c.json({ status: "ok", service: "shunt-shim" });
@@ -242,7 +315,19 @@ app.on(["POST", "PUT", "DELETE", "PATCH"], "/v1/models", (c) => {
   );
 });
 
-const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
+const handleChatCompletions = async (c: GatewayContext) => {
+  if (c.req.raw.signal.aborted) {
+    c.set("diagnostic", { attempts: 0 });
+    return c.json(
+      createErrorResponse(
+        "Client closed request or operation timed out",
+        "api_error",
+        "gateway_timeout",
+      ),
+      504,
+    );
+  }
+
   const bodyReadResult = await readRequestBodyWithLimit(c.req.raw);
   if (!bodyReadResult.ok) {
     return c.json(bodyReadResult.error, bodyReadResult.status);
@@ -270,6 +355,7 @@ const handleChatCompletions = async (c: Context<{ Bindings: GatewayEnv }>) => {
   const upstreamResult = await forwardChatCompletion(validation.data, c.env, {
     signal: c.req.raw.signal,
   });
+  c.set("diagnostic", upstreamResult.diagnostic);
   if (!upstreamResult.ok) {
     if (upstreamResult.headers) {
       for (const [key, value] of Object.entries(upstreamResult.headers)) {

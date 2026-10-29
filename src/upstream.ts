@@ -43,15 +43,30 @@ export interface ForwardChatCompletionOptions {
 }
 
 /**
+ * Diagnostic metadata captured during upstream request processing.
+ */
+export interface UpstreamDiagnosticMetadata {
+  provider?: "groq" | "gemini";
+  model?: string;
+  attempts?: number;
+  fallbackReason?: string;
+}
+
+/**
  * Result of an upstream completion dispatch attempt.
  */
 export type UpstreamCompletionResult =
-  | { ok: true; data: NormalizedChatCompletion }
+  | {
+      ok: true;
+      data: NormalizedChatCompletion;
+      diagnostic: UpstreamDiagnosticMetadata;
+    }
   | {
       ok: false;
       status: 429 | 502 | 503 | 504;
       error: ApiError;
       headers?: Record<string, string>;
+      diagnostic: UpstreamDiagnosticMetadata;
     };
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
@@ -60,6 +75,7 @@ const DEFAULT_TOTAL_DEADLINE_MS = 60000;
 interface AttemptSignal {
   signal: AbortSignal;
   cleanup: () => void;
+  isTimedOut: () => boolean;
 }
 
 function createAttemptSignal(
@@ -67,8 +83,10 @@ function createAttemptSignal(
   deadlineSignal: AbortSignal,
   timeoutMs: number,
 ): AttemptSignal {
+  let timedOut = false;
   const attemptController = new AbortController();
   const timer = setTimeout(() => {
+    timedOut = true;
     attemptController.abort(
       new DOMException("Connection timeout", "TimeoutError"),
     );
@@ -85,10 +103,12 @@ function createAttemptSignal(
     cleanup: () => {
       clearTimeout(timer);
     },
+    isTimedOut: () => timedOut || attemptController.signal.aborted,
   };
 }
 
 interface ProviderConfig {
+  name: "groq" | "gemini";
   targetUrl: string;
   model: string;
   apiKey: string;
@@ -109,7 +129,7 @@ function resolveGroqConfig(env: GatewayEnv): ProviderConfig {
   const targetUrl = `${baseUrl}/chat/completions`;
   const model = env.PRIMARY_MODEL ?? "qwen/qwen3.8-27b";
   const apiKey = env.GROQ_API_KEY ?? "";
-  return { targetUrl, model, apiKey };
+  return { name: "groq", targetUrl, model, apiKey };
 }
 
 function resolveGeminiConfig(env: GatewayEnv): ProviderConfig {
@@ -119,7 +139,7 @@ function resolveGeminiConfig(env: GatewayEnv): ProviderConfig {
   const targetUrl = `${baseUrl}/chat/completions`;
   const model = env.FALLBACK_MODEL ?? "gemini-2.5-flash-lite";
   const apiKey = env.GEMINI_API_KEY ?? "";
-  return { targetUrl, model, apiKey };
+  return { name: "gemini", targetUrl, model, apiKey };
 }
 
 function resolveProviderConfigs(env: GatewayEnv): {
@@ -380,6 +400,9 @@ export async function forwardChatCompletion(
         "api_error",
         "gateway_timeout",
       ),
+      diagnostic: {
+        attempts: 0,
+      },
     };
   }
 
@@ -393,6 +416,11 @@ export async function forwardChatCompletion(
         "invalid_request_error",
         "bad_gateway",
       ),
+      diagnostic: {
+        provider: primary.name,
+        model: primary.model,
+        attempts: 0,
+      },
     };
   }
 
@@ -407,6 +435,8 @@ export async function forwardChatCompletion(
       new DOMException("Total request deadline exceeded", "TimeoutError"),
     );
   }, totalDeadlineMs);
+
+  let fallbackReason: string | undefined;
 
   try {
     const primaryAttemptTimeoutMs = Math.max(
@@ -433,7 +463,7 @@ export async function forwardChatCompletion(
         body: JSON.stringify(primaryBody),
         signal: primaryAttempt.signal,
       });
-    } catch {
+    } catch (err) {
       if (options?.signal?.aborted) {
         return {
           ok: false,
@@ -443,6 +473,11 @@ export async function forwardChatCompletion(
             "api_error",
             "gateway_timeout",
           ),
+          diagnostic: {
+            provider: primary.name,
+            model: primary.model,
+            attempts: 1,
+          },
         };
       }
       if (
@@ -457,9 +492,20 @@ export async function forwardChatCompletion(
             "api_error",
             "gateway_timeout",
           ),
+          diagnostic: {
+            provider: primary.name,
+            model: primary.model,
+            attempts: 1,
+          },
         };
       }
       isPrimaryEligibleFailure = true;
+      const isTimeout =
+        primaryAttempt.isTimedOut() ||
+        (err instanceof Error &&
+          (err.name === "TimeoutError" ||
+            err.message.toLowerCase().includes("timeout")));
+      fallbackReason = isTimeout ? "connection_timeout" : "network_error";
     } finally {
       primaryAttempt.cleanup();
     }
@@ -473,6 +519,11 @@ export async function forwardChatCompletion(
           "api_error",
           "gateway_timeout",
         ),
+        diagnostic: {
+          provider: primary.name,
+          model: primary.model,
+          attempts: 1,
+        },
       };
     }
 
@@ -489,6 +540,11 @@ export async function forwardChatCompletion(
             "invalid_request_error",
             "bad_gateway",
           ),
+          diagnostic: {
+            provider: primary.name,
+            model: primary.model,
+            attempts: 1,
+          },
         };
       }
 
@@ -502,18 +558,32 @@ export async function forwardChatCompletion(
             "invalid_request_error",
             "bad_gateway",
           ),
+          diagnostic: {
+            provider: primary.name,
+            model: primary.model,
+            attempts: 1,
+          },
         };
       }
 
       return {
         ok: true,
         data: normalized,
+        diagnostic: {
+          provider: primary.name,
+          model: primary.model,
+          attempts: 1,
+        },
       };
     }
 
     if (primaryResponse) {
-      if (primaryResponse.status === 429 || primaryResponse.status === 503) {
+      if (primaryResponse.status === 429) {
         isPrimaryEligibleFailure = true;
+        fallbackReason = "rate_limit_exceeded";
+      } else if (primaryResponse.status === 503) {
+        isPrimaryEligibleFailure = true;
+        fallbackReason = "service_unavailable";
       }
     }
 
@@ -526,6 +596,11 @@ export async function forwardChatCompletion(
           "invalid_request_error",
           "bad_gateway",
         ),
+        diagnostic: {
+          provider: primary.name,
+          model: primary.model,
+          attempts: 1,
+        },
       };
     }
 
@@ -540,6 +615,12 @@ export async function forwardChatCompletion(
           "api_error",
           "gateway_timeout",
         ),
+        diagnostic: {
+          provider: primary.name,
+          model: primary.model,
+          attempts: 1,
+          ...(fallbackReason ? { fallbackReason } : {}),
+        },
       };
     }
 
@@ -552,6 +633,12 @@ export async function forwardChatCompletion(
           "invalid_request_error",
           "bad_gateway",
         ),
+        diagnostic: {
+          provider: primary.name,
+          model: primary.model,
+          attempts: 1,
+          ...(fallbackReason ? { fallbackReason } : {}),
+        },
       };
     }
 
@@ -587,6 +674,12 @@ export async function forwardChatCompletion(
             "api_error",
             "gateway_timeout",
           ),
+          diagnostic: {
+            provider: fallback.name,
+            model: fallback.model,
+            attempts: 2,
+            ...(fallbackReason ? { fallbackReason } : {}),
+          },
         };
       }
       if (
@@ -601,6 +694,12 @@ export async function forwardChatCompletion(
             "api_error",
             "gateway_timeout",
           ),
+          diagnostic: {
+            provider: fallback.name,
+            model: fallback.model,
+            attempts: 2,
+            ...(fallbackReason ? { fallbackReason } : {}),
+          },
         };
       }
       return {
@@ -611,6 +710,12 @@ export async function forwardChatCompletion(
           "api_error",
           "gateway_timeout",
         ),
+        diagnostic: {
+          provider: fallback.name,
+          model: fallback.model,
+          attempts: 2,
+          ...(fallbackReason ? { fallbackReason } : {}),
+        },
       };
     } finally {
       fallbackAttempt.cleanup();
@@ -629,6 +734,12 @@ export async function forwardChatCompletion(
             "invalid_request_error",
             "bad_gateway",
           ),
+          diagnostic: {
+            provider: fallback.name,
+            model: fallback.model,
+            attempts: 2,
+            ...(fallbackReason ? { fallbackReason } : {}),
+          },
         };
       }
 
@@ -642,12 +753,24 @@ export async function forwardChatCompletion(
             "invalid_request_error",
             "bad_gateway",
           ),
+          diagnostic: {
+            provider: fallback.name,
+            model: fallback.model,
+            attempts: 2,
+            ...(fallbackReason ? { fallbackReason } : {}),
+          },
         };
       }
 
       return {
         ok: true,
         data: normalized,
+        diagnostic: {
+          provider: fallback.name,
+          model: fallback.model,
+          attempts: 2,
+          ...(fallbackReason ? { fallbackReason } : {}),
+        },
       };
     }
 
@@ -666,6 +789,12 @@ export async function forwardChatCompletion(
           "rate_limit_exceeded",
         ),
         headers,
+        diagnostic: {
+          provider: fallback.name,
+          model: fallback.model,
+          attempts: 2,
+          ...(fallbackReason ? { fallbackReason } : {}),
+        },
       };
     }
 
@@ -678,6 +807,12 @@ export async function forwardChatCompletion(
           "api_error",
           "service_unavailable",
         ),
+        diagnostic: {
+          provider: fallback.name,
+          model: fallback.model,
+          attempts: 2,
+          ...(fallbackReason ? { fallbackReason } : {}),
+        },
       };
     }
 
@@ -689,6 +824,12 @@ export async function forwardChatCompletion(
         "invalid_request_error",
         "bad_gateway",
       ),
+      diagnostic: {
+        provider: fallback.name,
+        model: fallback.model,
+        attempts: 2,
+        ...(fallbackReason ? { fallbackReason } : {}),
+      },
     };
   } finally {
     clearTimeout(deadlineTimer);
