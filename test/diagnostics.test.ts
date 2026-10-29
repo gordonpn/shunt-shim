@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type DiagnosticRecord,
-  MAX_CAPTURED_RECORDS,
   emitDiagnostic,
   getCapturedDiagnostics,
+  MAX_CAPTURED_RECORDS,
   resetDiagnosticSink,
   setDiagnosticCapture,
   setDiagnosticSink,
@@ -299,6 +299,43 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
         expect(result.diagnostic.provider).toBe("groq");
         expect(result.diagnostic.model).toBe("qwen/qwen3.8-27b");
         expect(result.diagnostic.attempts).toBe(1);
+      }
+    });
+
+    it("emits metadata when total deadline expires during fallback", async () => {
+      captureFetch(async (url, init) => {
+        if (isGroqRequest(url)) {
+          return new Response("Groq rate limited", { status: 429 });
+        }
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            setTimeout(() => {
+              const error = new Error("Total deadline exceeded");
+              error.name = "TimeoutError";
+              reject(error);
+            }, 10);
+          });
+        });
+      });
+
+      const result = await forwardChatCompletion(
+        {
+          model: "fast",
+          messages: [{ role: "user", content: "hello" }],
+          stream: false,
+          extensions: {},
+        },
+        mockEnv,
+        { connectTimeoutMs: 1000, totalDeadlineMs: 50 },
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(504);
+        expect(result.diagnostic.provider).toBe("gemini");
+        expect(result.diagnostic.model).toBe("gemini-2.5-flash-lite");
+        expect(result.diagnostic.attempts).toBe(2);
+        expect(result.diagnostic.fallbackReason).toBe("rate_limit_exceeded");
       }
     });
 
