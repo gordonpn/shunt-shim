@@ -59,7 +59,7 @@ jobs:
         uses: hrishikesh-kadam/setup-lcov@6c1aa0cc9e1c02f9f58f01ac599f1064ccc83470 # v1
       - name: Configure LCOV
         run: |
-          echo "ignore_errors = inconsistent,corrupt,branch,format" >> ~/.lcovrc
+          echo "ignore_errors = inconsistent,corrupt,branch,format,category,count" >> ~/.lcovrc
           echo "stop_on_error = 0" >> ~/.lcovrc
       - name: Install dependencies
         run: just install-ci

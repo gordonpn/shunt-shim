@@ -34,6 +34,15 @@ export interface NormalizedChatCompletion {
 }
 
 /**
+ * Optional execution bounds and cancellation signals for upstream dispatch.
+ */
+export interface ForwardChatCompletionOptions {
+  signal?: AbortSignal;
+  connectTimeoutMs?: number;
+  totalDeadlineMs?: number;
+}
+
+/**
  * Result of an upstream completion dispatch attempt.
  */
 export type UpstreamCompletionResult =
@@ -44,6 +53,40 @@ export type UpstreamCompletionResult =
       error: ApiError;
       headers?: Record<string, string>;
     };
+
+const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
+const DEFAULT_TOTAL_DEADLINE_MS = 60000;
+
+interface AttemptSignal {
+  signal: AbortSignal;
+  cleanup: () => void;
+}
+
+function createAttemptSignal(
+  clientSignal: AbortSignal | undefined,
+  deadlineSignal: AbortSignal,
+  timeoutMs: number,
+): AttemptSignal {
+  const attemptController = new AbortController();
+  const timer = setTimeout(() => {
+    attemptController.abort(
+      new DOMException("Connection timeout", "TimeoutError"),
+    );
+  }, timeoutMs);
+
+  const signals: AbortSignal[] = [deadlineSignal, attemptController.signal];
+  if (clientSignal) {
+    signals.push(clientSignal);
+  }
+  const signal = AbortSignal.any(signals);
+
+  return {
+    signal,
+    cleanup: () => {
+      clearTimeout(timer);
+    },
+  };
+}
 
 interface ProviderConfig {
   targetUrl: string;
@@ -320,12 +363,26 @@ function normalizeUpstreamResponse(
  *
  * @param req - Validated chat completion request payload.
  * @param env - Gateway environment bindings containing secrets and routing configuration.
+ * @param options - Optional execution parameters such as abort signals and timeout limits.
  * @returns Result object containing the normalized completion or an API error.
  */
 export async function forwardChatCompletion(
   req: ValidatedChatCompletionRequest,
   env: GatewayEnv,
+  options?: ForwardChatCompletionOptions,
 ): Promise<UpstreamCompletionResult> {
+  if (options?.signal?.aborted) {
+    return {
+      ok: false,
+      status: 504,
+      error: createErrorResponse(
+        "Client closed request or operation timed out",
+        "api_error",
+        "gateway_timeout",
+      ),
+    };
+  }
+
   const { primary, fallback } = resolveProviderConfigs(env);
   if (!primary.apiKey) {
     return {
@@ -339,183 +396,301 @@ export async function forwardChatCompletion(
     };
   }
 
-  const primaryBody = buildUpstreamRequestBody(req, primary.model);
-  let primaryResponse: Response | undefined;
-  let isPrimaryEligibleFailure = false;
+  const connectTimeoutMs =
+    options?.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+  const totalDeadlineMs = options?.totalDeadlineMs ?? DEFAULT_TOTAL_DEADLINE_MS;
+  const startTime = Date.now();
+
+  const deadlineController = new AbortController();
+  const deadlineTimer = setTimeout(() => {
+    deadlineController.abort(
+      new DOMException("Total request deadline exceeded", "TimeoutError"),
+    );
+  }, totalDeadlineMs);
 
   try {
-    primaryResponse = await fetch(primary.targetUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${primary.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(primaryBody),
-    });
-  } catch {
-    isPrimaryEligibleFailure = true;
-  }
+    const primaryAttemptTimeoutMs = Math.max(
+      1,
+      Math.min(connectTimeoutMs, totalDeadlineMs),
+    );
+    const primaryAttempt = createAttemptSignal(
+      options?.signal,
+      deadlineController.signal,
+      primaryAttemptTimeoutMs,
+    );
 
-  if (primaryResponse?.ok) {
-    let rawJson: unknown;
+    const primaryBody = buildUpstreamRequestBody(req, primary.model);
+    let primaryResponse: Response | undefined;
+    let isPrimaryEligibleFailure = false;
+
     try {
-      rawJson = await primaryResponse.json();
+      primaryResponse = await fetch(primary.targetUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${primary.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(primaryBody),
+        signal: primaryAttempt.signal,
+      });
     } catch {
-      return {
-        ok: false,
-        status: 502,
-        error: createErrorResponse(
-          "Upstream provider returned malformed JSON",
-          "invalid_request_error",
-          "bad_gateway",
-        ),
-      };
-    }
-
-    const normalized = normalizeUpstreamResponse(rawJson);
-    if (!normalized) {
-      return {
-        ok: false,
-        status: 502,
-        error: createErrorResponse(
-          "Upstream provider returned an invalid completion payload",
-          "invalid_request_error",
-          "bad_gateway",
-        ),
-      };
-    }
-
-    return {
-      ok: true,
-      data: normalized,
-    };
-  }
-
-  if (primaryResponse) {
-    if (primaryResponse.status === 429 || primaryResponse.status === 503) {
+      if (options?.signal?.aborted) {
+        return {
+          ok: false,
+          status: 504,
+          error: createErrorResponse(
+            "Client closed request or operation timed out",
+            "api_error",
+            "gateway_timeout",
+          ),
+        };
+      }
+      if (
+        deadlineController.signal.aborted ||
+        Date.now() - startTime >= totalDeadlineMs
+      ) {
+        return {
+          ok: false,
+          status: 504,
+          error: createErrorResponse(
+            "Total request deadline exceeded",
+            "api_error",
+            "gateway_timeout",
+          ),
+        };
+      }
       isPrimaryEligibleFailure = true;
+    } finally {
+      primaryAttempt.cleanup();
     }
-  }
 
-  if (!isPrimaryEligibleFailure) {
-    return {
-      ok: false,
-      status: 502,
-      error: createErrorResponse(
-        "Upstream provider returned an error response",
-        "invalid_request_error",
-        "bad_gateway",
-      ),
-    };
-  }
+    if (options?.signal?.aborted) {
+      return {
+        ok: false,
+        status: 504,
+        error: createErrorResponse(
+          "Client closed request or operation timed out",
+          "api_error",
+          "gateway_timeout",
+        ),
+      };
+    }
 
-  if (!fallback.apiKey) {
-    return {
-      ok: false,
-      status: 502,
-      error: createErrorResponse(
-        "Missing fallback upstream API key configuration",
-        "invalid_request_error",
-        "bad_gateway",
-      ),
-    };
-  }
+    if (primaryResponse?.ok) {
+      let rawJson: unknown;
+      try {
+        rawJson = await primaryResponse.json();
+      } catch {
+        return {
+          ok: false,
+          status: 502,
+          error: createErrorResponse(
+            "Upstream provider returned malformed JSON",
+            "invalid_request_error",
+            "bad_gateway",
+          ),
+        };
+      }
 
-  const fallbackBody = buildUpstreamRequestBody(req, fallback.model);
-  let fallbackResponse: Response;
-  try {
-    fallbackResponse = await fetch(fallback.targetUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${fallback.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(fallbackBody),
-    });
-  } catch {
-    return {
-      ok: false,
-      status: 504,
-      error: createErrorResponse(
-        "Upstream provider timed out or connection failed",
-        "api_error",
-        "gateway_timeout",
-      ),
-    };
-  }
+      const normalized = normalizeUpstreamResponse(rawJson);
+      if (!normalized) {
+        return {
+          ok: false,
+          status: 502,
+          error: createErrorResponse(
+            "Upstream provider returned an invalid completion payload",
+            "invalid_request_error",
+            "bad_gateway",
+          ),
+        };
+      }
 
-  if (fallbackResponse.ok) {
-    let rawJson: unknown;
+      return {
+        ok: true,
+        data: normalized,
+      };
+    }
+
+    if (primaryResponse) {
+      if (primaryResponse.status === 429 || primaryResponse.status === 503) {
+        isPrimaryEligibleFailure = true;
+      }
+    }
+
+    if (!isPrimaryEligibleFailure) {
+      return {
+        ok: false,
+        status: 502,
+        error: createErrorResponse(
+          "Upstream provider returned an error response",
+          "invalid_request_error",
+          "bad_gateway",
+        ),
+      };
+    }
+
+    const elapsedMs = Date.now() - startTime;
+    const remainingMs = totalDeadlineMs - elapsedMs;
+    if (remainingMs <= 0 || deadlineController.signal.aborted) {
+      return {
+        ok: false,
+        status: 504,
+        error: createErrorResponse(
+          "Total request deadline exceeded",
+          "api_error",
+          "gateway_timeout",
+        ),
+      };
+    }
+
+    if (!fallback.apiKey) {
+      return {
+        ok: false,
+        status: 502,
+        error: createErrorResponse(
+          "Missing fallback upstream API key configuration",
+          "invalid_request_error",
+          "bad_gateway",
+        ),
+      };
+    }
+
+    const fallbackTimeoutMs = Math.max(
+      1,
+      Math.min(connectTimeoutMs, remainingMs),
+    );
+    const fallbackAttempt = createAttemptSignal(
+      options?.signal,
+      deadlineController.signal,
+      fallbackTimeoutMs,
+    );
+
+    const fallbackBody = buildUpstreamRequestBody(req, fallback.model);
+    let fallbackResponse: Response;
     try {
-      rawJson = await fallbackResponse.json();
+      fallbackResponse = await fetch(fallback.targetUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${fallback.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(fallbackBody),
+        signal: fallbackAttempt.signal,
+      });
     } catch {
+      if (options?.signal?.aborted) {
+        return {
+          ok: false,
+          status: 504,
+          error: createErrorResponse(
+            "Client closed request or operation timed out",
+            "api_error",
+            "gateway_timeout",
+          ),
+        };
+      }
+      if (
+        deadlineController.signal.aborted ||
+        Date.now() - startTime >= totalDeadlineMs
+      ) {
+        return {
+          ok: false,
+          status: 504,
+          error: createErrorResponse(
+            "Total request deadline exceeded",
+            "api_error",
+            "gateway_timeout",
+          ),
+        };
+      }
       return {
         ok: false,
-        status: 502,
+        status: 504,
         error: createErrorResponse(
-          "Upstream provider returned malformed JSON",
+          "Upstream provider timed out or connection failed",
+          "api_error",
+          "gateway_timeout",
+        ),
+      };
+    } finally {
+      fallbackAttempt.cleanup();
+    }
+
+    if (fallbackResponse.ok) {
+      let rawJson: unknown;
+      try {
+        rawJson = await fallbackResponse.json();
+      } catch {
+        return {
+          ok: false,
+          status: 502,
+          error: createErrorResponse(
+            "Upstream provider returned malformed JSON",
+            "invalid_request_error",
+            "bad_gateway",
+          ),
+        };
+      }
+
+      const normalized = normalizeUpstreamResponse(rawJson);
+      if (!normalized) {
+        return {
+          ok: false,
+          status: 502,
+          error: createErrorResponse(
+            "Upstream provider returned an invalid completion payload",
+            "invalid_request_error",
+            "bad_gateway",
+          ),
+        };
+      }
+
+      return {
+        ok: true,
+        data: normalized,
+      };
+    }
+
+    if (fallbackResponse.status === 429) {
+      const retryAfter = fallbackResponse.headers.get("Retry-After");
+      const headers: Record<string, string> = {};
+      if (retryAfter) {
+        headers["Retry-After"] = retryAfter;
+      }
+      return {
+        ok: false,
+        status: 429,
+        error: createErrorResponse(
+          "All upstream providers exceeded rate limits or quota",
           "invalid_request_error",
-          "bad_gateway",
+          "rate_limit_exceeded",
+        ),
+        headers,
+      };
+    }
+
+    if (fallbackResponse.status === 503) {
+      return {
+        ok: false,
+        status: 503,
+        error: createErrorResponse(
+          "All upstream providers are currently unavailable",
+          "api_error",
+          "service_unavailable",
         ),
       };
     }
 
-    const normalized = normalizeUpstreamResponse(rawJson);
-    if (!normalized) {
-      return {
-        ok: false,
-        status: 502,
-        error: createErrorResponse(
-          "Upstream provider returned an invalid completion payload",
-          "invalid_request_error",
-          "bad_gateway",
-        ),
-      };
-    }
-
-    return {
-      ok: true,
-      data: normalized,
-    };
-  }
-
-  if (fallbackResponse.status === 429) {
-    const retryAfter = fallbackResponse.headers.get("Retry-After");
-    const headers: Record<string, string> = {};
-    if (retryAfter) {
-      headers["Retry-After"] = retryAfter;
-    }
     return {
       ok: false,
-      status: 429,
+      status: 502,
       error: createErrorResponse(
-        "All upstream providers exceeded rate limits or quota",
+        "Upstream provider returned an unrecoverable error",
         "invalid_request_error",
-        "rate_limit_exceeded",
-      ),
-      headers,
-    };
-  }
-
-  if (fallbackResponse.status === 503) {
-    return {
-      ok: false,
-      status: 503,
-      error: createErrorResponse(
-        "All upstream providers are currently unavailable",
-        "api_error",
-        "service_unavailable",
+        "bad_gateway",
       ),
     };
+  } finally {
+    clearTimeout(deadlineTimer);
   }
-
-  return {
-    ok: false,
-    status: 502,
-    error: createErrorResponse(
-      "Upstream provider returned an unrecoverable error",
-      "invalid_request_error",
-      "bad_gateway",
-    ),
-  };
 }
