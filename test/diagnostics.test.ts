@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type DiagnosticRecord,
+  MAX_CAPTURED_RECORDS,
+  emitDiagnostic,
   getCapturedDiagnostics,
   resetDiagnosticSink,
   setDiagnosticCapture,
@@ -270,13 +272,37 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
     });
 
     it("emits metadata when total deadline expires during primary", async () => {
-      captureFetch(async () => {
-        return new Promise<Response>(() => {
-          // hangs until aborted
+      captureFetch(async (_url, init) => {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const error = new Error("Total request deadline exceeded");
+            error.name = "TimeoutError";
+            reject(error);
+          });
         });
       });
 
-      // Pass request with pre-aborted signal to trigger 504 immediately
+      const result = await forwardChatCompletion(
+        {
+          model: "fast",
+          messages: [{ role: "user", content: "hello" }],
+          stream: false,
+          extensions: {},
+        },
+        mockEnv,
+        { totalDeadlineMs: 15 },
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(504);
+        expect(result.diagnostic.provider).toBe("groq");
+        expect(result.diagnostic.model).toBe("qwen/qwen3.8-27b");
+        expect(result.diagnostic.attempts).toBe(1);
+      }
+    });
+
+    it("emits metadata when client disconnects prior to dispatch", async () => {
       const controller = new AbortController();
       controller.abort();
       const init: RequestInit = {
@@ -294,10 +320,11 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
       const req = new Request("http://localhost/v1/chat/completions", init);
       const res = await app.request(req, undefined, mockEnv);
 
-      expect([499, 504]).toContain(res.status);
+      expect(res.status).toBe(504);
       expect(capturedRecords.length).toBe(1);
       const record = requireDefined(capturedRecords[0]);
-      expect([499, 504]).toContain(record.status);
+      expect(record.status).toBe(504);
+      expect(record.attempts).toBe(0);
     });
   });
 
@@ -644,6 +671,27 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
         expect(result.status).toBe(504);
         expect(result.diagnostic.attempts).toBe(0);
       }
+    });
+
+    it("bounds in-memory captured records to MAX_CAPTURED_RECORDS, discarding oldest", () => {
+      resetDiagnosticSink();
+      setDiagnosticCapture(true);
+
+      for (let i = 0; i < MAX_CAPTURED_RECORDS + 5; i++) {
+        emitDiagnostic({
+          timestamp: new Date().toISOString(),
+          requestId: `req-${i}`,
+          status: 200,
+          latencyMs: 1,
+        });
+      }
+
+      const captured = getCapturedDiagnostics();
+      expect(captured.length).toBe(MAX_CAPTURED_RECORDS);
+      expect(captured[0]?.requestId).toBe("req-5");
+      expect(captured[captured.length - 1]?.requestId).toBe(
+        `req-${MAX_CAPTURED_RECORDS + 4}`,
+      );
     });
   });
 });

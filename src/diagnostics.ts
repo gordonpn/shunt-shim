@@ -29,6 +29,8 @@ export type DiagnosticSink = (
   record: DiagnosticRecord,
 ) => void;
 
+export const MAX_CAPTURED_RECORDS = 100;
+
 let activeSink: DiagnosticSink | null = null;
 let captureEnabled = false;
 let capturedRecords: DiagnosticRecord[] = [];
@@ -97,6 +99,9 @@ export function formatDiagnosticLog(record: DiagnosticRecord): string {
  */
 export function emitDiagnostic(record: DiagnosticRecord): void {
   if (captureEnabled) {
+    if (capturedRecords.length >= MAX_CAPTURED_RECORDS) {
+      capturedRecords.shift();
+    }
     capturedRecords.push(record);
   }
   const jsonString = formatDiagnosticLog(record);

@@ -14,6 +14,7 @@ export {
   DIAGNOSTIC_ALLOWLIST,
   type DiagnosticRecord,
   type DiagnosticSink,
+  MAX_CAPTURED_RECORDS,
   emitDiagnostic,
   formatDiagnosticLog,
   getCapturedDiagnostics,
