@@ -11,9 +11,9 @@ in each client's credential setting; keep upstream credentials on the gateway.
 
 | Client | Settings for `https://proxy.example.com` | Verified behavior |
 | :--- | :--- | :--- |
-| [DeepSeek Review v1](https://github.com/hustcer/deepseek-review/blob/eccde2e9781008d795e366b951e313e37af88dd5/nu/review.nu#L148-L216) | Action [inputs](https://github.com/hustcer/deepseek-review/blob/eccde2e9781008d795e366b951e313e37af88dd5/action.yaml): `base-url=https://proxy.example.com/v1`, `model=fast`, `chat-token=<gateway secret>` | Appends `/chat/completions`, sends Bearer auth and `thinking.type=disabled`; Actions use non-streaming, local CLI can stream |
-| [OpenCodeReview](https://github.com/alibaba/open-code-review/blob/182898cf522da3d04157b422752d028417974e19/action.yml) | Action `llm_protocol=openai`, `llm_url=https://proxy.example.com/v1/chat/completions`, `llm_model=fast`, `llm_auth_token=<gateway secret>` | Select OpenAI explicitly; default extra body disables thinking; default LLM timeout is 300 seconds |
-| [PR-Agent](https://github.com/The-PR-Agent/pr-agent/blob/99b72f62abb4c6dc7ebde98818dc535cf54d8023/docs/docs/usage-guide/changing_a_model.md#L711-L768) | `config.model=openai/fast`, `config.fallback_models=[]`, `openai.api_base=https://proxy.example.com/v1`, secret `OPENAI__KEY=<gateway secret>` | OpenAI prefix selects LiteLLM's compatible route; set `config.custom_model_max_tokens` to the verified shared context limit |
+| [DeepSeek Review v1](https://github.com/hustcer/deepseek-review/blob/eccde2e9781008d795e366b951e313e37af88dd5/nu/review.nu#L148-L216) | Action [inputs](https://github.com/hustcer/deepseek-review/blob/eccde2e9781008d795e366b951e313e37af88dd5/action.yaml): `base-url=https://proxy.example.com/v1`, `model=fast`, `chat-token=<gateway secret>` | Appends `/chat/completions`, sends Bearer auth and `thinking.type=disabled`; Action uses non-streaming JSON |
+| [OpenCodeReview](https://github.com/alibaba/open-code-review/blob/182898cf522da3d04157b422752d028417974e19/action.yml) | Action `llm_protocol=openai`, `llm_url=https://proxy.example.com/v1/chat/completions`, `llm_model=fast`, `llm_auth_token=<gateway secret>` | Select OpenAI explicitly; uses non-streaming JSON; default extra body disables thinking; default LLM timeout is 300 seconds |
+| [PR-Agent](https://github.com/The-PR-Agent/pr-agent/blob/99b72f62abb4c6dc7ebde98818dc535cf54d8023/docs/docs/usage-guide/changing_a_model.md#L711-L768) | `config.model=openai/fast`, `config.fallback_models=[]`, `openai.api_base=https://proxy.example.com/v1`, secret `OPENAI__KEY=<gateway secret>` | OpenAI prefix selects LiteLLM's compatible route with non-streaming completions; set both `config.max_model_tokens` and `config.custom_model_max_tokens` to the verified shared context limit (128000) to avoid clamping to the 32,000 default |
 
 PR-Agent's prefix is client routing metadata; the gateway receives `fast`. Do not
 configure external client fallback models. Check weak/reasoning model overrides
@@ -55,20 +55,19 @@ authentication headers elsewhere in the client do not prove OpenAI-mode support.
   HTTP 400 (`max_tokens and max_completion_tokens cannot both be set`), making dispatch
   normalization to a single parameter mandatory.
   See [Groq verification report](GROQ_CAPABILITY.md) and [Gemini verification report](GEMINI_CAPABILITY.md).
-- `stream` defaults to false and must be boolean. Accept
-  `stream_options.include_usage` as boolean for streaming; reject non-null
-  stream options when streaming is false. Omitted/null optional options use
-  defaults; empty tools mean no tools. Empty messages remain invalid.
+- `stream` defaults to false. Streaming completions (`stream: true`) and stream
+  options (`stream_options`) are deferred to post-MVP. Requests specifying
+  `stream: true` or `stream_options` are deterministically rejected with HTTP 400
+  `unsupported_parameter` before upstream dispatch.
 - Accept `thinking` and `reasoning_effort` as compatibility extensions. Preserve
   unknown fields in the parsed request without rejecting them. Only an explicit
   per-provider mapping may forward extensions; otherwise ignore them. Extensions
   cannot override model, endpoint, auth, or validated core fields. Ignoring a
   reasoning hint does not promise reasoning support or disable upstream thinking.
 
-Use Groq's native OpenAI-compatible endpoint and Google Gemini's native Google REST
-API via a dedicated bidirectional translation adapter, with a small validated request
-representation. Normalize output limits and approved extensions at dispatch.
-Native Anthropic adapters and a general provider IR are deferred.
+Both Groq and Google AI Studio use OpenAI-compatible `/chat/completions` endpoints
+with a small validated request representation. Normalize output limits and approved
+extensions at dispatch. Native Anthropic adapters and a general provider IR are deferred.
 
 ### Shared request bounds
 
@@ -77,16 +76,15 @@ Native Anthropic adapters and a general provider IR are deferred.
 | Inbound Request Body Limit | 10,485,760 | bytes (10 MB) | Immediate HTTP 413 `payload_too_large` response prior to JSON parse; zero upstream dispatch. On the Workers Free plan (10 ms CPU limit), parsing near-limit payloads will be benchmarked; streaming parsing or payload ceiling calibration applies if parsing approaches CPU budget. |
 | Shared Context Window Ceiling | 128,000 | tokens | Combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq context on pinned primary model `qwen/qwen3.8-27b` (128k context). PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` prior to upstream dispatch. |
 | Max Output Tokens Bound | 8,192 | tokens | Accepted in `max_tokens` or `max_completion_tokens`. Both Groq and Gemini support up to 8,192 completion tokens. |
-| Upstream Connect Timeout | 5,000 | ms (5s) | Per-attempt connection deadline. Connection failure or reaching the 5s connect deadline on Attempt 1 triggers eligible fallback before response commitment. |
-| Upstream Attempt Timeout | 60,000 | ms (60s) | Per-attempt execution deadline. Attempt 1 reaching 60s without committing response headers triggers eligible fallback if remaining gateway deadline permits; Attempt 2 reaching 60s triggers HTTP 504 `gateway_timeout`. |
-| Total Gateway Deadline | 150,000 | ms (150s) | Bounded wall-clock deadline across all attempts. Expiration before response commitment terminates request with HTTP 504 `gateway_timeout`. Expiration after response commitment terminates active stream without emitting `[DONE]`. |
+| Upstream Connect / Attempt Timeout | 5,000 | ms (5s) | Per-attempt connection and fetch timeout. Connection failure or reaching the 5s timeout on Attempt 1 triggers eligible fallback before response commitment. |
+| Total Gateway Deadline | 60,000 | ms (60s) | Bounded wall-clock deadline across all attempts. Expiration before response commitment terminates request with HTTP 504 `gateway_timeout`. |
 
 Client and ingress timeout alignment:
 - DeepSeek Review v1 Nu review script default timeout: 180 seconds.
 - OpenCodeReview default LLM client timeout: 300 seconds.
 - PR-Agent LiteLLM default client timeout: 300 seconds.
-- Cloudflare Workers edge network streaming timeout: 180 to 300 seconds (configured to exceed the 150s gateway total deadline by at least 30 seconds to guarantee delivery of HTTP 504 responses prior to edge termination).
-All client and edge ingress timeouts exceed the gateway's 150s bounded total deadline.
+- Cloudflare Workers edge network timeout: 180 to 300 seconds (exceeds the 60s gateway total deadline to guarantee delivery of HTTP 504 responses prior to edge termination).
+All client and edge ingress timeouts exceed the gateway's 60s bounded total deadline.
 
 ### Request validation pipeline and status precedence
 
@@ -122,16 +120,7 @@ Validation checks run in the following strict sequential pipeline before upstrea
 - Preserve upstream `usage` token counts and optional token details when present;
   never fabricate zero usage. Optional `reasoning_content` may be preserved, but
   content-only completions must work. No reasoning generation guarantee is made.
-- Streaming uses `text/event-stream`, incremental `chat.completion.chunk` events,
-  stable IDs/model/created, indexed text/tool deltas, null interim finish reasons,
-  and a final finish reason followed by `data: [DONE]`. Preserve fragmented tool
-  arguments and multiple calls. Never buffer the entire completion or synthesize
-  a successful terminator after upstream failure. With include_usage, preserve
-  the final usage-only event with `choices=[]` before `[DONE]`. Groq emits this
-  event natively, while Gemini delivers usage on its final chunk with choices;
-  the gateway streaming normalizer splits Gemini's terminal chunk to emit the
-  standard usage-only event with `choices=[]` before `[DONE]` (see
-  [Gemini verification report](GEMINI_CAPABILITY.md)).
+- Streaming is deferred beyond the MVP. If `stream: true` or `stream_options` is supplied in the request body, the gateway deterministically rejects the request with HTTP 400 `unsupported_parameter` before upstream dispatch.
 - Errors use an OpenAI-style `error` object with message, type, param, and code.
   Map invalid input to 400, gateway auth to 401, unknown alias to 404, body limit
   to 413, quota exhaustion to 429, internal failure to 500, invalid upstream
@@ -145,18 +134,17 @@ Validation checks run in the following strict sequential pipeline before upstrea
   No replay after downstream headers/body are committed. Select deadlines within
   each client's timeout and configure ingress timeouts above the gateway bound.
 
-### Downstream commitment point (streaming)
+### Downstream commitment point
 
-The downstream commitment point is defined as the moment the gateway flushes HTTP 200 response headers (`Content-Type: text/event-stream`) to the downstream client. Once headers are committed to the network, the HTTP status is finalized and cannot be converted to an error or fallback response.
+The downstream commitment point is defined as the moment the gateway flushes HTTP 200 response headers and body bytes to the downstream client. Once headers are committed to the network, the HTTP status is finalized and cannot be converted to an error or fallback response.
 
 - **Provider lock**: As soon as HTTP 200 response headers are committed, the chosen upstream provider is permanently locked. No fallback or status code changes are possible once headers are in flight.
-- **Zero mid-stream replay**: The gateway will strictly never replay a request on the fallback provider once response headers are sent.
-- **Mid-stream failure handling**: If the upstream provider disconnects, aborts, errors, or reaches a deadline after downstream header commitment, the gateway terminates the downstream connection immediately without emitting a synthetic `data: [DONE]` terminator. The client observes a truncated stream and handles the transport error.
+- **Zero mid-flight replay**: The gateway will strictly never replay a request on the fallback provider once response headers are sent.
 - **Client disconnect cancellation**: The Worker environment enables the `enable_request_signal` compatibility flag, propagating client disconnection through `Request.signal` to cancel active upstream fetches via `AbortController`.
 
 ### Mixed-failure mapping and observable outcomes
 
-When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect timeout, or 60s execution timeout) before downstream response header commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 150s total deadline.
+When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s fetch timeout) before downstream response commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 60s total deadline.
 
 The returned HTTP status code and OpenAI-compatible error object match the final failing attempt:
 
@@ -164,28 +152,27 @@ The returned HTTP status code and OpenAI-compatible error object match the final
 | :--- | :--- | :--- | :--- | :--- |
 | 429 Too Many Requests | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 503 Service Unavailable | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
-| Connect Timeout (5s) | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
-| Attempt 1 Timeout (60s) | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| Connect / Fetch Timeout (5s) | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 429 Too Many Requests | 429 Too Many Requests | 429 | `rate_limit_exceeded` | All providers rate-limited; preserve `Retry-After` from final attempt. |
 | 429 Too Many Requests | 503 Service Unavailable | 503 | `service_unavailable` | Final attempt unavailable; return 503 error. |
 | 503 Service Unavailable | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | 503 Service Unavailable | 503 Service Unavailable | 503 | `service_unavailable` | Both providers unavailable; return 503 error. |
-| Eligible failure (429/503/timeout) | Attempt Timeout (60s) | 504 | `gateway_timeout` | Fallback attempt timed out before commitment; return 504 error. |
-| Eligible failure (429/503/timeout) | Total Deadline (150s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
-| Connect Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
-| Connect Timeout (5s) | Connect Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
+| Eligible failure (429/503/timeout) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
+| Connect / Fetch Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
+| Connect / Fetch Timeout (5s) | Connect / Fetch Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
 | 400 Bad Request | (No fallback) | 502 | `bad_gateway` | Upstream validation failure; do not retry; return 502 error. |
 | 401 / 403 Unauthorized | (No fallback) | 502 | `bad_gateway` | Upstream credential failure; do not expose upstream keys; return 502 error. |
-| Headers committed (200 SSE) | Upstream failure / timeout | 200 | (Aborted) | Stream severed without `[DONE]`; zero fallback replay. |
+| Headers committed (200 OK) | Connection reset / drop | 200 | (Aborted) | Response already in transit; zero fallback replay. |
 | Client disconnect | (In progress) | (Closed) | (Aborted) | Abort upstream fetch immediately via AbortController. |
 
 ## Evidence required before compatibility claims
 
 Automate every row in [MVP acceptance criteria](MVP.md#acceptance-criteria), including
-negative cases, with mocked upstreams. Verify successful JSON, tools, SSE, and
+negative cases, with mocked upstreams. Verify successful JSON, tools, and
 usage independently for each account-selected model. Run DeepSeek Review's Action
 text review, OpenCodeReview's complete tool cycle, and PR-Agent's review through
-the deployed gateway; test streaming via supported client modes and fixtures.
+the deployed gateway; verify non-streaming JSON completions and deterministic
+rejection of streaming requests (`stream: true` and `stream_options`).
 Repeat OpenCodeReview's tool cycle with a controlled eligible primary failure.
 Record sanitized revisions, settings, request IDs, results, and commands under
 `docs/`. A contract fixture or successful text response alone is not proof that

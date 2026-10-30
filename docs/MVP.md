@@ -1,9 +1,10 @@
 # MVP Scope and Deployment Options
 
-Status: runtime, request bounds, and fallback strategy agreed, not implemented. The runtime and
-deployment target is agreed as Cloudflare Workers (TypeScript / Hono).
-See [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md) and
-[ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md).
+Status: Cloudflare Worker service implemented. See [ARCHITECTURE.md](ARCHITECTURE.md),
+[CONFIGURATION.md](CONFIGURATION.md), and [COMPATIBILITY.md](COMPATIBILITY.md) for the
+active runtime contract. See [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md)
+and [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md) for foundational
+decision records.
 
 The other architecture, configuration, and runbook documents describe the broader
 design. Their commands and capabilities are not evidence of a working gateway.
@@ -27,9 +28,9 @@ If every eligible provider is exhausted, return an explicit error.
 | Endpoints | `GET /v1/models`; one completion handler at `/v1/chat/completions` and `/chat/completions` |
 | Routing | One alias, `fast`, with Groq first and Gemini as fallback |
 | Models | Explicit allowlist of models verified available on the configured accounts' free tiers |
-| Responses | Non-streaming JSON and streaming SSE |
+| Responses | Non-streaming JSON (streaming SSE deferred to post-MVP; stream: true rejected with HTTP 400 unsupported_parameter) |
 | Coding support | System/user/assistant/tool messages, function tools, tool results, both token-limit fields, optional reasoning metadata and usage |
-| Failover | At most one fallback attempt, on upstream HTTP 429, HTTP 503, connect failure / 5s connect timeout, or 60s Attempt 1 timeout |
+| Failover | At most one fallback attempt, on upstream HTTP 429, HTTP 503, connect failure / 5s fetch timeout within 60s total deadline |
 | Safety | Authentication and payload validation before upstream dispatch; body limits, bounded timeouts, and cancellation |
 | Diagnostics | Provider, actual model, status, latency, and fallback reason; no prompts, completions, or credentials |
 
@@ -39,25 +40,20 @@ reasoning hints; forward only approved provider mappings and ignore other extras
 Never let extensions override validated fields or credentials. Do not select paid
 models or forward caller credentials upstream.
 
-Fallback is permitted only before committing the downstream response. Once a
-stream starts, never replay the request on another provider. Do not conceal
+Fallback is permitted only before committing the downstream response. Once headers
+are sent, never replay the request on another provider. Do not conceal
 upstream validation or credential failures behind a fallback. If all candidates
 are rate-limited, return an OpenAI-style HTTP 429 error; upstream unavailability
 must remain distinguishable from quota exhaustion.
 
-Provider endpoint selection follows [ADR 0002](adr/0002-model-fallback-and-provider-adaptation-strategy.md):
+Provider endpoint selection:
 
 - [Groq chat completions](https://console.groq.com/docs/api-reference):
-  native OpenAI-compatible REST API pass-through with field validation.
-- [Google Gemini REST API](https://ai.google.dev/api/generate-content):
-  native Google REST API (`:generateContent` and `:streamGenerateContent?alt=sse`)
-  via a dedicated bidirectional translation adapter.
+  native OpenAI-compatible REST API (`/openai/v1/chat/completions`) with field validation.
+- [Google AI Studio chat completions](https://aistudio.google.com):
+  official OpenAI-compatible REST API (`/v1beta/openai/chat/completions`) for fallback dispatch.
 
-Using Gemini's native Google REST API grants direct control over safety settings,
-generation configurations, system instruction placement, and tool calling schemas,
-avoiding the impedance mismatch of third-party OpenAI emulation layers. Verify
-the actual client and model behavior before claiming compatibility. Preserve
-streamed tool-call fields and finish reasons, not just text deltas.
+Both providers serve standard OpenAI-compatible completions endpoints, avoiding custom protocol translation adapters. Verify the actual client and model behavior before claiming compatibility. Preserve tool-call fields and finish reasons in normalized JSON responses.
 
 ## Deferred
 
@@ -87,7 +83,7 @@ tests for all three clients. Each provider must pass successful cases independen
 | Given | When | Then |
 | :--- | :--- | :--- |
 | Missing, invalid, malformed, or conflicting gateway credentials | Any API endpoint is requested | Return HTTP 401 and make no upstream request |
-| Valid Bearer, x-api-key, or matching dual credentials | Either completion path is requested | Execute identical auth, validation, routing, JSON/SSE, and error behavior |
+| Valid Bearer, x-api-key, or matching dual credentials | Either completion path is requested | Execute identical auth, validation, routing, JSON, and error behavior |
 | Valid gateway credentials | The model catalog is requested | Return exactly the supported `fast` alias in OpenAI model-list format |
 | Malformed JSON/core fields, invalid messages/tools, or an unknown alias | A completion is requested | Return 400 for invalid input or 404 for an unknown alias with no upstream request |
 | Unknown extras, disabled/enabled thinking hints, or reasoning_effort | An otherwise valid request is parsed | Accept it; only approved mappings are forwarded and core fields cannot be overridden |
@@ -97,21 +93,20 @@ tests for all three clients. Each provider must pass successful cases independen
 | A valid text request | Either provider succeeds | Return an OpenAI-compatible JSON completion |
 | Tool-only, truncated, filtered, content-only, or malformed upstream output | JSON is returned | Preserve valid finish reasons and null tool-only content; missing metadata or invalid shapes produce 502 |
 | Upstream usage or optional reasoning_content is present or absent | A response is returned | Preserve supplied metadata without inventing token counts or requiring reasoning content |
-| A valid streaming request | Either provider succeeds | Deliver incremental SSE events without buffering the whole response and preserve the completion terminator |
-| stream_options.include_usage is true, false, or absent | A streaming response completes | For true preserve the final choices=[] usage event before [DONE]; other cases must also parse correctly |
-| A tool-capable request | The client sends tools and later their results | Preserve tool-call identifiers, arguments, result messages, and finish reasons in JSON and streaming responses |
+| A request with stream: true or stream_options supplied | A completion is requested | Return HTTP 400 unsupported_parameter before upstream dispatch |
+| A tool-capable request | The client sends tools and later their results | Preserve tool-call identifiers, arguments, result messages, and finish reasons in normalized JSON responses |
 | The primary returns 429 or 503, or times out before response commitment | The fallback succeeds | Make exactly one fallback attempt and return its response |
 | The primary returns a validation or credential error | A completion is requested | Surface the error without attempting fallback |
 | Both providers return 429 | A completion is requested | Return a clear HTTP 429 error without further attempts |
 | Both providers are unavailable | A completion is requested | Return a bounded failure distinguishable from quota exhaustion |
 | Timeout, protocol failure, upstream auth rejection, or mixed eligible failures | Attempts end before commitment | Use the contract's 504/502/final-attempt category and safe retry headers, never an HTTP 200 error |
-| The primary has already begun streaming | The stream fails | End the failed stream without replaying on the fallback |
+| Downstream response commitment | Headers are committed | Deliver response without mid-flight fallback replay |
 | The client disconnects or the request deadline expires | Upstream work is active | Cancel upstream work and make no further attempts |
 
 The final smoke tests must run all three clients through the deployed gateway:
 DeepSeek Review Action text, OpenCodeReview tool-call/tool-result/final-response,
 and PR-Agent review. Prove each provider independently and controlled fallback.
-Streaming remains required for the MVP; a text-only smoke test is insufficient.
+Non-streaming JSON completions are certified for the MVP; streaming SSE is deferred to post-MVP.
 
 ## Language Choices on Cloudflare Workers
 

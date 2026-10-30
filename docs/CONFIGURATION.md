@@ -1,23 +1,16 @@
 # Configuration Reference
 
-This document describes configuration schemas, environment variables, edge secrets, and virtual aliases for `shunt-shim`. The Worker service is implemented under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md). The broader alias and multi-tenant priority proposals below are deferred beyond the [MVP](MVP.md); no KV binding or quota-accounting configuration is required for the MVP.
+This document describes configuration schemas, environment variables, edge secrets, and virtual aliases for `shunt-shim`. The Worker service is implemented under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
-## MVP configuration constraints
+## MVP Configuration Constraints
 
-The [client settings and canonical contract](COMPATIBILITY.md) take precedence over
-the broader examples below. Configure one random gateway secret, one fast alias,
-Groq primary and Gemini fallback with fixed endpoints and account-verified models.
-The GATEWAY_TOKENS secret contains only that one secret for the MVP; its plural name
-does not imply tenant support. Direct provider model names are rejected.
-Accept either Bearer or x-api-key against the same secret and reject conflicting
-headers. Provider keys are independent and never sent to clients.
+The [client settings and canonical contract](COMPATIBILITY.md) govern the runtime. Configure one random gateway secret, one `fast` alias, and the default Groq-primary and Gemini-fallback routing with verified model allowlists.
 
-Select and document body limits, core parameter bounds, approved extension mappings,
-connect/total deadlines, and the shared context/output limits. The total deadline
-covers both attempts, fits client timeouts, and remains below ingress timeouts.
-No paid substitution, second fallback, context router, or reasoning guarantee is
-enabled by the MVP configuration. PR-Agent needs an explicit shared context limit
-and gateway-only model settings.
+By default, the gateway routes primary traffic to Groq (`qwen/qwen3.8-27b`) and falls back to Google AI Studio (`gemini-2.5-flash-lite`). The runtime accepts optional overrides: `PRIMARY_PROVIDER` (switching primary between `groq` and `gemini`), `GROQ_BASE_URL` (overriding Groq API endpoint), and `GEMINI_BASE_URL` (overriding Google AI Studio OpenAI endpoint).
+
+The `GATEWAY_TOKENS` secret contains only that one secret for the MVP; its plural name does not imply multi-tenant support. Direct provider model names are rejected with HTTP 404 `model_not_found`. Accept either Bearer or `x-api-key` against the same secret and reject conflicting headers. Provider keys are independent and never sent to clients.
+
+The total request deadline covers both attempts, fits client timeouts, and remains below ingress timeouts. No database, KV namespace, multi-tenant token catalog, context router, or paid fallback is enabled by the MVP configuration.
 
 ## 1. Edge Secrets and Environment Variables
 
@@ -28,9 +21,16 @@ Upstream API keys and edge runtime configurations are managed via Cloudflare Wor
 | `GEMINI_API_KEY` | Secret | API key for Google AI Studio | Yes | `AIzaSy...` |
 | `GROQ_API_KEY` | Secret | API key for Groq Cloud | Yes | `gsk_...` |
 | `GATEWAY_TOKENS` | Secret | Gateway authentication secret (single secret for MVP) | Yes | `<one-random-gateway-secret>` |
-| `OPENROUTER_API_KEY` | Secret | API key for OpenRouter (deferred beyond MVP) | No | `sk-or-v1-...` |
 | `GATEWAY_ENV` | Variable | Runtime environment identifier | No | `production` (default: `development`) |
-| `CONTEXT_ROUTER_THRESHOLD` | Variable | Estimated token count that forces large-context routing (deferred beyond MVP) | No | `100000` |
+| `PORT` | Variable | Local development server port | No | `8787` (default: `8787`) |
+| `GROQ_BASE_URL` | Variable | Groq API base URL override | No | `https://api.groq.com/openai/v1` |
+| `GEMINI_BASE_URL` | Variable | Google AI Studio OpenAI-compatible base URL override | No | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `PRIMARY_PROVIDER` | Variable | Primary provider selector (`ALLOWED_PRIMARY_PROVIDERS`: `groq`, `gemini`) | No | `groq` (default: `groq`) |
+| `PRIMARY_MODEL` | Variable | Primary model name (restricted to `ALLOWED_PRIMARY_MODELS`: `qwen/qwen3.8-27b`) | No | `qwen/qwen3.8-27b` |
+| `FALLBACK_MODEL` | Variable | Fallback model name (restricted to `ALLOWED_FALLBACK_MODELS`: `gemini-2.5-flash-lite`) | No | `gemini-2.5-flash-lite` |
+
+> [!NOTE]
+> `PRIMARY_MODEL` and `FALLBACK_MODEL` are validated against strict environment allowlists (`ALLOWED_PRIMARY_MODELS` and `ALLOWED_FALLBACK_MODELS`). For the MVP, only the verified models (`qwen/qwen3.8-27b` for primary Groq and `gemini-2.5-flash-lite` for fallback Gemini) are permitted. Configuring any other model string causes `validateEnvironment()` to reject the configuration with HTTP 500. `PRIMARY_PROVIDER` must be either `groq` or `gemini`.
 
 ### Secret Management Commands
 Secrets must never be committed to source control. Set secrets in production using Wrangler:
@@ -43,6 +43,11 @@ pnpm exec wrangler secret put GATEWAY_TOKENS
 For local development, copy `.env.example` to `.dev.vars` (which is excluded by `.gitignore`):
 ```bash
 cp .env.example .dev.vars
+```
+
+Validate configured secrets locally using the task runner:
+```bash
+just check-secrets
 ```
 
 ## 2. Wrangler Configuration (`wrangler.jsonc`)
@@ -64,36 +69,55 @@ The implemented Worker deployment configuration:
 }
 ```
 
-The `enable_request_signal` flag enables downstream client disconnect detection through `Request.signal` in the Workers runtime, allowing the gateway to abort in-flight upstream fetches via `AbortController` when clients close their connection.
+The `enable_request_signal` flag enables downstream client disconnect detection through `Request.signal` in the Workers runtime, allowing the gateway to abort in-flight upstream fetches via `AbortController` when clients close their connection. The MVP requires no KV namespace or database bindings.
 
 ## 3. Virtual Model Aliases and Routing Matrix
 
-Client applications should query virtual aliases rather than hardcoded provider models. The router evaluates fallbacks sequentially if the primary route encounters errors or quota exhaustion.
+Client applications query virtual aliases rather than hardcoded provider models. The router evaluates fallbacks sequentially if the primary route encounters errors or quota exhaustion.
 
-| Virtual Alias | Primary Provider and Model | First Fallback | Second Fallback | Target Use Case |
-| :--- | :--- | :--- | :--- | :--- |
-| `fast` | Groq (`qwen/qwen3.8-27b`) | Google AI Studio (`gemini-2.5-flash-lite`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Low-latency chat, terminal completions, interactive CLI |
-| `deep` | Google AI Studio (`gemini-3.8-flash`) | OpenRouter (`meta-llama/llama-3.3-70b-instruct:free`) | Google AI Studio (`gemini-2.5-flash-lite`) | Large file analysis, repository context, document summarization |
-| `reasoning` | OpenRouter (`deepseek/deepseek-r1:free`) | Google AI Studio (`gemini-2.5-pro`) | Groq (`openai/gpt-oss-120b`) | Architectural planning, complex debugging, code generation |
+The MVP accepts exactly one virtual alias: `fast`.
 
-Direct provider model routing is a deferred proposal. The MVP accepts only fast;
-an unknown alias returns HTTP 404 without an upstream call. `qwen/qwen3.8-27b` is pinned
-as the primary model because it reliably supports all four `tool_choice` variants
-(`auto`, `required`, named, and `none`) without upstream failure.
+| Virtual Alias | Primary Provider and Model | Fallback Provider and Model | Target Use Case |
+| :--- | :--- | :--- | :--- |
+| `fast` | Groq (`qwen/qwen3.8-27b`) | Google AI Studio (`gemini-2.5-flash-lite`) | Code review, tool calls, and automated PR analysis |
 
-## 4. Deferred Multi-Tenant Project Tokens and Priority Levels
+Direct provider model names and unknown aliases return HTTP 404 `model_not_found` prior to upstream dispatch. Additional aliases (`deep`, `reasoning`) and third-party providers (OpenRouter, Workers AI) are deferred beyond the MVP.
 
-The MVP accepts only one random bearer-token secret configured via `GATEWAY_TOKENS`.
-Multi-tenant partitioning and priority levels are deferred beyond the MVP:
+`qwen/qwen3.8-27b` is pinned as the primary model because it reliably supports all four `tool_choice` variants (`auto`, `required`, named, and `none`) without upstream failure. `gemini-2.5-flash-lite` serves as the fallback via Google AI Studio's OpenAI-compatible endpoint.
 
-| Token Identifier | Priority Tier | Behavior During Low Quota (<10% Remaining) |
+## 4. Request Bounds and Timeout Limits
+
+The gateway enforces deterministic bounds across all requests:
+
+| Parameter / Bound | Value | Enforcement Behavior |
 | :--- | :--- | :--- |
-| `sk-proj-aider` | `interactive` | Always processed. Given first claim on remaining quota. |
-| `sk-proj-opencode` | `interactive` | Always processed. Given first claim on remaining quota. |
-| `sk-proj-server` | `background` | Paused or diverted to low-priority fallback models when quota drops under 100 RPD. |
-| `sk-proj-webhook` | `background` | Degraded to lightweight models (`gemini-2.5-flash-lite` or Workers AI). |
-| `sk-proj-default` | `standard` | Normal waterfall routing without priority reservation. |
+| Inbound Request Body Limit | 10 MB (10,485,760 bytes) | Rejects oversized requests with HTTP 413 `payload_too_large` before JSON parsing. |
+| Shared Context Window Ceiling | 128,000 tokens | Requests exceeding combined character-based prompt estimate (`Math.ceil(chars / 4)`) and requested completion tokens return HTTP 400 `context_length_exceeded`. |
+| Maximum Output Tokens | 8,192 tokens | Supported via `max_tokens` or `max_completion_tokens`. Normalized to single upstream parameter. |
+| Upstream Connect Timeout | 5,000 ms (5 seconds) | Per-attempt connection deadline. Reaching 5s on primary triggers fallback. |
+| Total Request Deadline | 60,000 ms (60 seconds) | Total wall-clock deadline across all attempts. Expiration returns HTTP 504 `gateway_timeout`. |
 
-## 5. Deferred Quota Accounting
+## 5. Streaming Request Rejection (Deferred Feature)
 
-The MVP has no shared usage counters, circuit-breaker schema, or quota namespace. Cloudflare KV is eventually consistent and does not support atomic counter updates, so its read-modify-write counters cannot enforce global quotas under concurrency. If strict coordination becomes necessary on Workers, evaluate Durable Objects with transactional storage. See [the accounting decision](ARCHITECTURE.md#deferred-accounting).
+Streaming completions (`stream: true`) and stream configuration options (`stream_options`) are deferred to post-MVP. The gateway deterministically rejects streaming requests before upstream dispatch with HTTP 400 Bad Request:
+
+```json
+{
+  "error": {
+    "message": "Streaming is not supported by this gateway. Please omit 'stream' or set 'stream': false.",
+    "type": "invalid_request_error",
+    "code": "unsupported_parameter",
+    "param": "stream"
+  }
+}
+```
+
+If `stream_options` is supplied in the request body, the gateway returns HTTP 400 with code `unsupported_parameter`, param `stream_options`, and message `"stream_options is not supported by this gateway."`.
+
+Client applications must configure non-streaming completions (`stream: false` or omitted).
+
+## 6. Deferred Multi-Tenant Tokens and Accounting
+
+The MVP accepts only one random bearer-token secret configured via `GATEWAY_TOKENS`. Multi-tenant token catalogs (`sk-proj-*`), priority tiers, context-based model switching, and shared usage counters are deferred beyond the MVP.
+
+No KV namespace or database is provisioned. Upstream HTTP status codes (HTTP 429, HTTP 503) and connection timeouts drive bounded fallback directly.
