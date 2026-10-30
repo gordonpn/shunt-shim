@@ -11,9 +11,9 @@ in each client's credential setting; keep upstream credentials on the gateway.
 
 | Client | Settings for `https://proxy.example.com` | Verified behavior |
 | :--- | :--- | :--- |
-| [DeepSeek Review v1](https://github.com/hustcer/deepseek-review/blob/eccde2e9781008d795e366b951e313e37af88dd5/nu/review.nu#L148-L216) | Action [inputs](https://github.com/hustcer/deepseek-review/blob/eccde2e9781008d795e366b951e313e37af88dd5/action.yaml): `base-url=https://proxy.example.com/v1`, `model=fast`, `chat-token=<gateway secret>` | Appends `/chat/completions`, sends Bearer auth and `thinking.type=disabled`; Actions use non-streaming, local CLI can stream |
-| [OpenCodeReview](https://github.com/alibaba/open-code-review/blob/182898cf522da3d04157b422752d028417974e19/action.yml) | Action `llm_protocol=openai`, `llm_url=https://proxy.example.com/v1/chat/completions`, `llm_model=fast`, `llm_auth_token=<gateway secret>` | Select OpenAI explicitly; default extra body disables thinking; default LLM timeout is 300 seconds |
-| [PR-Agent](https://github.com/The-PR-Agent/pr-agent/blob/99b72f62abb4c6dc7ebde98818dc535cf54d8023/docs/docs/usage-guide/changing_a_model.md#L711-L768) | `config.model=openai/fast`, `config.fallback_models=[]`, `openai.api_base=https://proxy.example.com/v1`, secret `OPENAI__KEY=<gateway secret>` | OpenAI prefix selects LiteLLM's compatible route; set `config.custom_model_max_tokens` to the verified shared context limit |
+| [DeepSeek Review v1](https://github.com/hustcer/deepseek-review/blob/eccde2e9781008d795e366b951e313e37af88dd5/nu/review.nu#L148-L216) | Action [inputs](https://github.com/hustcer/deepseek-review/blob/eccde2e9781008d795e366b951e313e37af88dd5/action.yaml): `base-url=https://proxy.example.com/v1`, `model=fast`, `chat-token=<gateway secret>` | Appends `/chat/completions`, sends Bearer auth and `thinking.type=disabled`; Action uses non-streaming JSON |
+| [OpenCodeReview](https://github.com/alibaba/open-code-review/blob/182898cf522da3d04157b422752d028417974e19/action.yml) | Action `llm_protocol=openai`, `llm_url=https://proxy.example.com/v1/chat/completions`, `llm_model=fast`, `llm_auth_token=<gateway secret>` | Select OpenAI explicitly; uses non-streaming JSON; default extra body disables thinking; default LLM timeout is 300 seconds |
+| [PR-Agent](https://github.com/The-PR-Agent/pr-agent/blob/99b72f62abb4c6dc7ebde98818dc535cf54d8023/docs/docs/usage-guide/changing_a_model.md#L711-L768) | `config.model=openai/fast`, `config.fallback_models=[]`, `openai.api_base=https://proxy.example.com/v1`, secret `OPENAI__KEY=<gateway secret>` | OpenAI prefix selects LiteLLM's compatible route with non-streaming completions; set `config.custom_model_max_tokens` to the verified shared context limit (128000) |
 
 PR-Agent's prefix is client routing metadata; the gateway receives `fast`. Do not
 configure external client fallback models. Check weak/reasoning model overrides
@@ -55,20 +55,19 @@ authentication headers elsewhere in the client do not prove OpenAI-mode support.
   HTTP 400 (`max_tokens and max_completion_tokens cannot both be set`), making dispatch
   normalization to a single parameter mandatory.
   See [Groq verification report](GROQ_CAPABILITY.md) and [Gemini verification report](GEMINI_CAPABILITY.md).
-- `stream` defaults to false and must be boolean. Accept
-  `stream_options.include_usage` as boolean for streaming; reject non-null
-  stream options when streaming is false. Omitted/null optional options use
-  defaults; empty tools mean no tools. Empty messages remain invalid.
+- `stream` defaults to false. Streaming completions (`stream: true`) and stream
+  options (`stream_options`) are deferred to post-MVP. Requests specifying
+  `stream: true` or `stream_options` are deterministically rejected with HTTP 400
+  `unsupported_parameter` before upstream dispatch.
 - Accept `thinking` and `reasoning_effort` as compatibility extensions. Preserve
   unknown fields in the parsed request without rejecting them. Only an explicit
   per-provider mapping may forward extensions; otherwise ignore them. Extensions
   cannot override model, endpoint, auth, or validated core fields. Ignoring a
   reasoning hint does not promise reasoning support or disable upstream thinking.
 
-Use Groq's native OpenAI-compatible endpoint and Google Gemini's native Google REST
-API via a dedicated bidirectional translation adapter, with a small validated request
-representation. Normalize output limits and approved extensions at dispatch.
-Native Anthropic adapters and a general provider IR are deferred.
+Both Groq and Google AI Studio use OpenAI-compatible `/chat/completions` endpoints
+with a small validated request representation. Normalize output limits and approved
+extensions at dispatch. Native Anthropic adapters and a general provider IR are deferred.
 
 ### Shared request bounds
 
@@ -79,14 +78,14 @@ Native Anthropic adapters and a general provider IR are deferred.
 | Max Output Tokens Bound | 8,192 | tokens | Accepted in `max_tokens` or `max_completion_tokens`. Both Groq and Gemini support up to 8,192 completion tokens. |
 | Upstream Connect Timeout | 5,000 | ms (5s) | Per-attempt connection deadline. Connection failure or reaching the 5s connect deadline on Attempt 1 triggers eligible fallback before response commitment. |
 | Upstream Attempt Timeout | 60,000 | ms (60s) | Per-attempt execution deadline. Attempt 1 reaching 60s without committing response headers triggers eligible fallback if remaining gateway deadline permits; Attempt 2 reaching 60s triggers HTTP 504 `gateway_timeout`. |
-| Total Gateway Deadline | 150,000 | ms (150s) | Bounded wall-clock deadline across all attempts. Expiration before response commitment terminates request with HTTP 504 `gateway_timeout`. Expiration after response commitment terminates active stream without emitting `[DONE]`. |
+| Total Gateway Deadline | 60,000 | ms (60s) | Bounded wall-clock deadline across all attempts. Expiration before response commitment terminates request with HTTP 504 `gateway_timeout`. |
 
 Client and ingress timeout alignment:
 - DeepSeek Review v1 Nu review script default timeout: 180 seconds.
 - OpenCodeReview default LLM client timeout: 300 seconds.
 - PR-Agent LiteLLM default client timeout: 300 seconds.
-- Cloudflare Workers edge network streaming timeout: 180 to 300 seconds (configured to exceed the 150s gateway total deadline by at least 30 seconds to guarantee delivery of HTTP 504 responses prior to edge termination).
-All client and edge ingress timeouts exceed the gateway's 150s bounded total deadline.
+- Cloudflare Workers edge network timeout: 180 to 300 seconds (exceeds the 60s gateway total deadline to guarantee delivery of HTTP 504 responses prior to edge termination).
+All client and edge ingress timeouts exceed the gateway's 60s bounded total deadline.
 
 ### Request validation pipeline and status precedence
 
@@ -156,7 +155,7 @@ The downstream commitment point is defined as the moment the gateway flushes HTT
 
 ### Mixed-failure mapping and observable outcomes
 
-When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect timeout, or 60s execution timeout) before downstream response header commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 150s total deadline.
+When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect timeout, or 60s execution timeout) before downstream response header commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 60s total deadline.
 
 The returned HTTP status code and OpenAI-compatible error object match the final failing attempt:
 
@@ -171,7 +170,7 @@ The returned HTTP status code and OpenAI-compatible error object match the final
 | 503 Service Unavailable | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | 503 Service Unavailable | 503 Service Unavailable | 503 | `service_unavailable` | Both providers unavailable; return 503 error. |
 | Eligible failure (429/503/timeout) | Attempt Timeout (60s) | 504 | `gateway_timeout` | Fallback attempt timed out before commitment; return 504 error. |
-| Eligible failure (429/503/timeout) | Total Deadline (150s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
+| Eligible failure (429/503/timeout) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
 | Connect Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | Connect Timeout (5s) | Connect Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
 | 400 Bad Request | (No fallback) | 502 | `bad_gateway` | Upstream validation failure; do not retry; return 502 error. |

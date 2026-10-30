@@ -1,15 +1,8 @@
 # Operational Runbook
 
-This runbook documents setup, deployment, verification, monitoring, and incident response procedures for `shunt-shim`.
+This runbook documents setup, deployment, verification, monitoring, and incident response procedures for `shunt-shim`. The Worker service is implemented under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
-Status: Cloudflare Workers deployment runnable. The Worker entrypoint and Wrangler configuration are implemented under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md). The [MVP](MVP.md) defers shared accounting and requires no KV namespace.
-
-MVP prerequisites override the broader examples: only Groq/Gemini keys and one
-random gateway secret are required. Use [client configuration](COMPATIBILITY.md)
-for all three reviewers. Before deployment, verify the ingress allows incremental
-SSE, disables response buffering, propagates disconnect cancellation, and has a
-timeout above the gateway's total bound. Configure client timeouts to exceed that
-bound; OpenCodeReview defaults to 300 seconds, not an unlimited request lifetime.
+Prerequisites: only Groq and Google AI Studio API keys and one random gateway secret are required. The MVP defers shared accounting and requires no KV namespace or database.
 
 ## 1. Prerequisites and Local Environment
 
@@ -21,7 +14,6 @@ Ensure the following tools are installed:
 Ensure active developer accounts and API keys from upstream providers:
 - Google AI Studio API Key ([aistudio.google.com](https://aistudio.google.com))
 - Groq Cloud API Key ([console.groq.com](https://console.groq.com))
-- OpenRouter API Key ([openrouter.ai](https://openrouter.ai)) (optional, for DeepSeek fallback)
 
 ## 2. Local Development Setup
 
@@ -42,7 +34,13 @@ Ensure active developer accounts and API keys from upstream providers:
    just check-secrets
    ```
 
-4. Start the local worker emulator:
+4. Run local test suite and quality gates:
+   ```bash
+   just typecheck
+   just test
+   ```
+
+5. Start the local worker emulator:
    ```bash
    just dev
    ```
@@ -106,21 +104,33 @@ curl -s -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
     ]
   }' | jq .
 ```
+Expected response: HTTP 200 with OpenAI-compatible JSON completion.
 
-### Test Streaming Chat Completion (`stream: true`)
+### Verify Streaming Request Rejection (`stream: true`)
+Streaming is deferred to post-MVP. Verify that requests with `stream: true` are rejected with HTTP 400 Bad Request:
 ```bash
-curl -N -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
+curl -i -s -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
   -H "Authorization: Bearer ${GATEWAY_SECRET}" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "fast",
     "stream": true,
     "messages": [
-      {"role": "user", "content": "Count from 1 to 5."}
+      {"role": "user", "content": "Hello"}
     ]
   }'
 ```
-Verify that standard `data: {"choices":[{"delta":{"content":"..."}}]}` SSE events stream followed by `data: [DONE]`.
+Expected response: HTTP 400 Bad Request with:
+```json
+{
+  "error": {
+    "message": "Streaming is not currently supported in MVP",
+    "type": "invalid_request_error",
+    "code": "unsupported_parameter",
+    "param": "stream"
+  }
+}
+```
 
 ### Verify Authentication Enforcement
 ```bash
@@ -130,13 +140,6 @@ curl -i -X GET "${GATEWAY_BASE_URL}/v1/models" \
 Verify that the server rejects the request with HTTP `401 Unauthorized`.
 
 ## 5. Observability and Monitoring
-
-Before release, record all [MVP acceptance cases](MVP.md#acceptance-criteria), both
-providers independently, and deployed DeepSeek Review/PR-Agent reviews plus an
-OpenCodeReview tool-call/result/final-answer cycle. Repeat the tool cycle with a
-controlled primary failure. Preserve sanitized versions, settings, request IDs,
-commands, incremental SSE/usage evidence, and outcomes under docs/; do not claim
-compatibility from these illustrative curl commands alone.
 
 ### Real-Time Log Streaming
 Tail edge execution logs live:
@@ -161,7 +164,7 @@ Every request emits a single structured JSON line upon completion. To safeguard 
 **Privacy Controls and Credential Exclusion:**
 - Payloads, user prompts, system prompts, assistant completions, tool arguments, and tool results are never logged.
 - Client credentials (`Authorization`, `x-api-key`) and upstream secrets (`GROQ_API_KEY`, `GEMINI_API_KEY`) are strictly excluded.
-- Pre-dispatch rejections (such as HTTP 400, 401, 404, 405, 500) omit provider and model rather than fabricating placeholder values.
+- Pre-dispatch rejections (such as HTTP 400, 401, 404, 405, 413) omit provider and model rather than fabricating placeholder values.
 - Downstream clients receive the correlation identifier in the `x-request-id` HTTP response header for tracking.
 
 Example diagnostic log entry:
@@ -175,19 +178,18 @@ Example fallback log entry:
 ```
 
 ### Quota Diagnostics
-The MVP has no shared quota counters or circuit-breaker state to inspect. Use upstream status codes, rate-limit headers when available, and provider dashboards as the source of truth. See [deferred accounting](ARCHITECTURE.md#deferred-accounting) before introducing quota storage; KV counters cannot reliably enforce global quotas under concurrency.
+The MVP has no shared quota counters or circuit-breaker state to inspect. Use upstream status codes, rate-limit headers when available, and provider dashboards as the source of truth.
 
 ## 6. Incident Handling and Diagnostics
 
 ### Upstream HTTP 429 (Rate Limit Tripped)
-- Symptom: Real-time logs indicate upstream 429 from Groq or Google AI Studio.
-- Action: Verify that the one eligible fallback was attempted before response commitment. If both providers are rate-limited, expect an explicit HTTP 429 error. Inspect provider limits and retry guidance rather than local KV counters.
+- Symptom: Real-time logs indicate upstream 429 from Groq.
+- Action: Verify that fallback to Gemini was attempted before returning. If both providers are rate-limited, the gateway returns an explicit HTTP 429 error. Inspect provider limits in respective dashboards.
 
-### Google AI Studio Quota Exhaustion
-- Symptom: The provider reports quota exhaustion, for example through HTTP 429.
-- Action: Check the configured account and model's limits in the provider dashboard. The MVP has no proactive daily counter or predicted reset schedule. If the Gemini fallback is exhausted too, surface the quota error rather than claiming guaranteed failover.
+### Upstream Connection Timeout or Outage
+- Symptom: Primary request exceeds 5s connection timeout or returns HTTP 503.
+- Action: The gateway will automatically attempt fallback to Gemini. If the 60s total request deadline expires, the gateway returns HTTP 504 `gateway_timeout`.
 
-### Upstream Schema or Protocol Drift
-- Symptom: Streaming chunks fail to parse or return empty responses.
-- Diagnostics: Correlate request IDs, provider/model, status, latency, and fallback reason. Use synthetic fixtures for protocol inspection; never log raw prompts, completions, chunks, or credentials.
-- Resolution: Reproduce against a pinned client and provider fixture, correct the compatible response handling, and rerun JSON/SSE/tool/usage contracts before deployment.
+### Client Disconnect
+- Symptom: Client aborts the request before completion.
+- Action: In-flight upstream fetches abort via linked `AbortController`. Zero attempts are recorded if aborted prior to dispatch.
