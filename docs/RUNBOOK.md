@@ -1,6 +1,6 @@
 # Operational Runbook
 
-This runbook documents setup, deployment, verification, monitoring, and incident response procedures for `shunt-shim`. The Worker service is implemented under [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
+This runbook documents setup, deployment, verification, monitoring, and incident response procedures for `shunt-shim`. The Worker service architecture is defined by [ARCHITECTURE.md](ARCHITECTURE.md), based on foundational decisions in [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
 Prerequisites: only Groq and Google AI Studio API keys and one random gateway secret are required. The MVP defers shared accounting and requires no KV namespace or database.
 
@@ -124,7 +124,7 @@ Expected response: HTTP 400 Bad Request with:
 ```json
 {
   "error": {
-    "message": "Streaming is not currently supported in MVP",
+    "message": "Streaming is not supported by this gateway. Please omit 'stream' or set 'stream': false.",
     "type": "invalid_request_error",
     "code": "unsupported_parameter",
     "param": "stream"

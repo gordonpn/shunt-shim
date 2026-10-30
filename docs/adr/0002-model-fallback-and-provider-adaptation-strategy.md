@@ -1,7 +1,10 @@
 # 2. Model Fallback and Provider Adaptation Strategy
 
 Date: 2026-10-13
-Status: Accepted
+Status: Accepted (Amended for MVP: OpenAI-compatible Google AI Studio endpoint, non-streaming JSON, 60s total deadline; see docs/ARCHITECTURE.md)
+
+> [!NOTE]
+> **MVP Amendment (2026-10-30)**: For the implemented MVP runtime, Google AI Studio uses its official OpenAI-compatible endpoint (`/v1beta/openai/chat/completions`), streaming SSE is deferred and rejected with HTTP 400 `unsupported_parameter`, and the total gateway deadline is 60 seconds. Dynamic circuit breakers with isolate-local memory will govern post-MVP multi-turn failover; the MVP implements bounded one-fallback failover. See [ARCHITECTURE.md](../ARCHITECTURE.md) and [COMPATIBILITY.md](../COMPATIBILITY.md) for the active runtime contract.
 
 ## Context
 

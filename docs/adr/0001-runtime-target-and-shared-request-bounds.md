@@ -1,7 +1,10 @@
 # 1. Runtime Target and Shared Request Bounds
 
 Date: 2026-10-12
-Status: Accepted
+Status: Accepted (Amended for MVP: non-streaming JSON, 60s total deadline; see docs/ARCHITECTURE.md)
+
+> [!NOTE]
+> **MVP Amendment (2026-10-30)**: For the implemented MVP runtime, streaming SSE is deferred and rejected with HTTP 400 `unsupported_parameter`, and the total gateway deadline is 60 seconds (with a 5-second per-attempt timeout). See [ARCHITECTURE.md](../ARCHITECTURE.md) and [COMPATIBILITY.md](../COMPATIBILITY.md) for the active runtime contract.
 
 ## Context
 

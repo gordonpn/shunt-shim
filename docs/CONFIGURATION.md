@@ -4,7 +4,9 @@ This document describes configuration schemas, environment variables, edge secre
 
 ## MVP Configuration Constraints
 
-The [client settings and canonical contract](COMPATIBILITY.md) govern the runtime. Configure one random gateway secret, one `fast` alias, Groq primary and Gemini fallback with fixed endpoints and account-verified models.
+The [client settings and canonical contract](COMPATIBILITY.md) govern the runtime. Configure one random gateway secret, one `fast` alias, and the default Groq-primary and Gemini-fallback routing with verified model allowlists.
+
+By default, the gateway routes primary traffic to Groq (`qwen/qwen3.8-27b`) and falls back to Google AI Studio (`gemini-2.5-flash-lite`). The runtime accepts optional overrides: `PRIMARY_PROVIDER` (switching primary between `groq` and `gemini`), `GROQ_BASE_URL` (overriding Groq API endpoint), and `GEMINI_BASE_URL` (overriding Google AI Studio OpenAI endpoint).
 
 The `GATEWAY_TOKENS` secret contains only that one secret for the MVP; its plural name does not imply multi-tenant support. Direct provider model names are rejected with HTTP 404 `model_not_found`. Accept either Bearer or `x-api-key` against the same secret and reject conflicting headers. Provider keys are independent and never sent to clients.
 
@@ -23,11 +25,12 @@ Upstream API keys and edge runtime configurations are managed via Cloudflare Wor
 | `PORT` | Variable | Local development server port | No | `8787` (default: `8787`) |
 | `GROQ_BASE_URL` | Variable | Groq API base URL override | No | `https://api.groq.com/openai/v1` |
 | `GEMINI_BASE_URL` | Variable | Google AI Studio OpenAI-compatible base URL override | No | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `PRIMARY_PROVIDER` | Variable | Primary provider selector (`ALLOWED_PRIMARY_PROVIDERS`: `groq`, `gemini`) | No | `groq` (default: `groq`) |
 | `PRIMARY_MODEL` | Variable | Primary model name (restricted to `ALLOWED_PRIMARY_MODELS`: `qwen/qwen3.8-27b`) | No | `qwen/qwen3.8-27b` |
 | `FALLBACK_MODEL` | Variable | Fallback model name (restricted to `ALLOWED_FALLBACK_MODELS`: `gemini-2.5-flash-lite`) | No | `gemini-2.5-flash-lite` |
 
 > [!NOTE]
-> `PRIMARY_MODEL` and `FALLBACK_MODEL` are validated against strict environment allowlists (`ALLOWED_PRIMARY_MODELS` and `ALLOWED_FALLBACK_MODELS`). For the MVP, only the verified models (`qwen/qwen3.8-27b` for primary Groq and `gemini-2.5-flash-lite` for fallback Gemini) are permitted. Configuring any other model string causes `validateEnvironment()` to reject the configuration with HTTP 500.
+> `PRIMARY_MODEL` and `FALLBACK_MODEL` are validated against strict environment allowlists (`ALLOWED_PRIMARY_MODELS` and `ALLOWED_FALLBACK_MODELS`). For the MVP, only the verified models (`qwen/qwen3.8-27b` for primary Groq and `gemini-2.5-flash-lite` for fallback Gemini) are permitted. Configuring any other model string causes `validateEnvironment()` to reject the configuration with HTTP 500. `PRIMARY_PROVIDER` must be either `groq` or `gemini`.
 
 ### Secret Management Commands
 Secrets must never be committed to source control. Set secrets in production using Wrangler:
@@ -89,7 +92,7 @@ The gateway enforces deterministic bounds across all requests:
 | Parameter / Bound | Value | Enforcement Behavior |
 | :--- | :--- | :--- |
 | Inbound Request Body Limit | 10 MB (10,485,760 bytes) | Rejects oversized requests with HTTP 413 `payload_too_large` before JSON parsing. |
-| Shared Context Window Ceiling | 128,000 tokens | Requests exceeding combined prompt and completion token limit return HTTP 400 `context_length_exceeded`. |
+| Shared Context Window Ceiling | 128,000 tokens | Requests exceeding combined character-based prompt estimate (`Math.ceil(chars / 4)`) and requested completion tokens return HTTP 400 `context_length_exceeded`. |
 | Maximum Output Tokens | 8,192 tokens | Supported via `max_tokens` or `max_completion_tokens`. Normalized to single upstream parameter. |
 | Upstream Connect Timeout | 5,000 ms (5 seconds) | Per-attempt connection deadline. Reaching 5s on primary triggers fallback. |
 | Total Request Deadline | 60,000 ms (60 seconds) | Total wall-clock deadline across all attempts. Expiration returns HTTP 504 `gateway_timeout`. |
@@ -101,13 +104,15 @@ Streaming completions (`stream: true`) and stream configuration options (`stream
 ```json
 {
   "error": {
-    "message": "Streaming is not currently supported in MVP",
+    "message": "Streaming is not supported by this gateway. Please omit 'stream' or set 'stream': false.",
     "type": "invalid_request_error",
     "code": "unsupported_parameter",
     "param": "stream"
   }
 }
 ```
+
+If `stream_options` is supplied in the request body, the gateway returns HTTP 400 with code `unsupported_parameter`, param `stream_options`, and message `"stream_options is not supported by this gateway."`.
 
 Client applications must configure non-streaming completions (`stream: false` or omitted).
 

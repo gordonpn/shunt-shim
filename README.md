@@ -1,8 +1,8 @@
 # shunt-shim
 
-Status: Cloudflare Worker service implemented with reproducible quality gates. See [MVP scope and acceptance criteria](docs/MVP.md) for the specification, verification gates, and platform trade-offs.
+Status: Cloudflare Worker service implemented with reproducible quality gates. See [MVP scope and acceptance criteria](docs/MVP.md) and [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the active runtime architecture, verification gates, and platform trade-offs.
 
-`shunt-shim` is an OpenAI-compatible routing gateway for free-tier large language model (LLM) providers. The MVP exposes a `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. Cloudflare Workers (TypeScript / Hono) is the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md)). Model fallback and provider adaptation strategies are documented in [ADR 0002](docs/adr/0002-model-fallback-and-provider-adaptation-strategy.md).
+`shunt-shim` is an OpenAI-compatible routing gateway for free-tier large language model (LLM) providers. The MVP exposes a `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. Cloudflare Workers (TypeScript / Hono) is the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md) and [ARCHITECTURE.md](docs/ARCHITECTURE.md)). Model fallback and provider adaptation strategies are documented in [ADR 0002](docs/adr/0002-model-fallback-and-provider-adaptation-strategy.md).
 
 The goal is to let DeepSeek Review, OpenCodeReview, and PR-Agent use one endpoint without client code changes. Compatibility requires deployed evidence for all three, including OpenCodeReview's tool-call round trip. See the [pinned client sources and contract](docs/COMPATIBILITY.md).
 
@@ -62,7 +62,7 @@ GROQ_API_KEY="gsk_..."
 GATEWAY_TOKENS="<one-random-gateway-secret>"
 ```
 
-Validate secrets, check types, run test coverage, and start the local development server:
+Validate secrets, check types, run tests, and start the local development server:
 ```bash
 just check-secrets
 just typecheck

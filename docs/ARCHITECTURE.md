@@ -27,10 +27,10 @@ The MVP presents an OpenAI Chat Completions HTTP interface to client application
                 |                             |
           OpenAI HTTP                   OpenAI HTTP
                 v                             v
-+-------------------------------+ +---------------------------+
-|             Groq              | |     Google AI Studio      |
-|   Primary: qwen/qwen3.8-27b   | |Fallback: gemini-2.5-flash |
-+-------------------------------+ +---------------------------+
++-------------------------------+ +-----------------------------------+
+|             Groq              | |         Google AI Studio          |
+|   Primary: qwen/qwen3.8-27b   | | Fallback: gemini-2.5-flash-lite   |
++-------------------------------+ +-----------------------------------+
 ```
 
 ## 2. Platform Selection: Edge Worker vs Local Daemon
@@ -66,10 +66,10 @@ The request pipeline runs the following validation and routing steps:
 4. Body Size Enforcement ------> [413 if body > 10 MB]
        |
        v
-5. Streaming Guard ------------> [400 unsupported_parameter if stream: true]
+5. Schema & Model Validation --> [400 if malformed, 404 if model != fast, 400 if tokens > 128k]
        |
        v
-6. Schema & Model Validation --> [400 if malformed, 404 if model != fast, 400 if tokens > 128k]
+6. Streaming Guard ------------> [400 unsupported_parameter if stream: true or stream_options supplied]
        |
        v
 7. Primary Dispatch (Groq) ----> [Attempt primary qwen/qwen3.8-27b with 5s connect timeout]
@@ -98,11 +98,11 @@ The gateway validates credentials from either `Authorization: Bearer <token>` or
 ### Stage 4: Body Size Limit
 Requests are read with a 10 MB limit (`10,485,760` bytes). Payloads exceeding this ceiling return HTTP 413 `payload_too_large` before JSON parsing.
 
-### Stage 5: Streaming Guard
-Streaming completions are deferred beyond the MVP. If the parsed request body contains `"stream": true` or `"stream_options"`, the gateway returns HTTP 400 Bad Request with code `unsupported_parameter` and param `stream`.
+### Stage 5: Schema and Model Validation
+The request must contain a non-empty `messages` array with valid roles (`system`, `user`, `assistant`, `tool`). Assistant messages with tool calls and tool responses with matching `tool_call_id` are validated. Unknown model strings return HTTP 404 `model_not_found`; only `fast` is accepted. Requests exceeding the estimated 128,000-token context ceiling return HTTP 400 `context_length_exceeded`.
 
-### Stage 6: Schema and Model Validation
-The request must contain a non-empty `messages` array with valid roles (`system`, `user`, `assistant`, `tool`). Assistant messages with tool calls and tool responses with matching `tool_call_id` are validated. Unknown model strings return HTTP 404 `model_not_found`; only `fast` is accepted. Requests exceeding the 128,000-token context ceiling return HTTP 400 `context_length_exceeded`.
+### Stage 6: Streaming Guard
+Streaming completions are deferred beyond the MVP. If the parsed request body contains `"stream": true`, the gateway returns HTTP 400 Bad Request with code `unsupported_parameter` and param `stream`. If `stream_options` is supplied, the gateway returns HTTP 400 Bad Request with code `unsupported_parameter` and param `stream_options`.
 
 ### Stage 7: Upstream Dispatch and Bounded Fallback
 - **Attempt 1 (Primary):** Dispatches to Groq `qwen/qwen3.8-27b` using `https://api.groq.com/openai/v1/chat/completions`. A 5s connection timeout aborts stagnant handshakes.
