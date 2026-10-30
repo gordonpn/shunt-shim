@@ -144,6 +144,36 @@ Tail edge execution logs live:
 just tail
 ```
 
+### Safe Structured Diagnostics
+Every request emits a single structured JSON line upon completion. To safeguard user privacy and security, diagnostic records strictly adhere to an explicit metadata allowlist:
+
+| Field | Type | Description |
+|---|---|---|
+| `timestamp` | string | ISO 8601 UTC timestamp of request completion. |
+| `requestId` | string | Correlation identifier from `x-request-id` header or generated UUID. |
+| `status` | number | HTTP response status code. |
+| `latencyMs` | number | Total request execution duration in milliseconds. |
+| `provider` | string (optional) | Upstream provider serving the request (`groq` or `gemini`). Omitted on pre-dispatch rejections. |
+| `model` | string (optional) | Concrete upstream model name. Omitted on pre-dispatch rejections. |
+| `fallbackReason` | string (optional) | Reason triggering fallback dispatch (`rate_limit_exceeded`, `service_unavailable`, `connection_timeout`, `network_error`). |
+| `attempts` | number (optional) | Count of upstream dispatch attempts executed (`0`, `1`, or `2`). |
+
+**Privacy Controls and Credential Exclusion:**
+- Payloads, user prompts, system prompts, assistant completions, tool arguments, and tool results are never logged.
+- Client credentials (`Authorization`, `x-api-key`) and upstream secrets (`GROQ_API_KEY`, `GEMINI_API_KEY`) are strictly excluded.
+- Pre-dispatch rejections (such as HTTP 400, 401, 404, 405, 500) omit provider and model rather than fabricating placeholder values.
+- Downstream clients receive the correlation identifier in the `x-request-id` HTTP response header for tracking.
+
+Example diagnostic log entry:
+```json
+{"timestamp":"2026-10-29T21:44:57.285Z","requestId":"7be65a03-4510-4139-9175-12e3eceab564","status":200,"latencyMs":142,"provider":"groq","model":"qwen/qwen3.8-27b","attempts":1}
+```
+
+Example fallback log entry:
+```json
+{"timestamp":"2026-10-29T21:44:57.285Z","requestId":"c3a10d92-2310-4f51-b856-02e48aa12d09","status":200,"latencyMs":328,"provider":"gemini","model":"gemini-2.5-flash-lite","fallbackReason":"rate_limit_exceeded","attempts":2}
+```
+
 ### Quota Diagnostics
 The MVP has no shared quota counters or circuit-breaker state to inspect. Use upstream status codes, rate-limit headers when available, and provider dashboards as the source of truth. See [deferred accounting](ARCHITECTURE.md#deferred-accounting) before introducing quota storage; KV counters cannot reliably enforce global quotas under concurrency.
 

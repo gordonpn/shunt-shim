@@ -417,9 +417,11 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
         expect(init?.signal).toBeDefined();
         return new Promise<Response>((_, reject) => {
           init?.signal?.addEventListener("abort", () => {
-            const error = new Error("Total deadline exceeded");
-            error.name = "TimeoutError";
-            reject(error);
+            setTimeout(() => {
+              const error = new Error("Total deadline exceeded");
+              error.name = "TimeoutError";
+              reject(error);
+            }, 10);
           });
         });
       });
@@ -433,6 +435,7 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
       if (!res.ok) {
         expect(res.status).toBe(504);
         expect(res.error.error.code).toBe("gateway_timeout");
+        expect(res.error.error.message).toBe("Total request deadline exceeded");
       }
       expect(calls.length).toBe(2);
       const firstCall = getCall(calls, 0);
