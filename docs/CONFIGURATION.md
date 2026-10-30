@@ -23,8 +23,11 @@ Upstream API keys and edge runtime configurations are managed via Cloudflare Wor
 | `PORT` | Variable | Local development server port | No | `8787` (default: `8787`) |
 | `GROQ_BASE_URL` | Variable | Groq API base URL override | No | `https://api.groq.com/openai/v1` |
 | `GEMINI_BASE_URL` | Variable | Google AI Studio OpenAI-compatible base URL override | No | `https://generativelanguage.googleapis.com/v1beta/openai` |
-| `PRIMARY_MODEL` | Variable | Primary model name override | No | `qwen/qwen3.8-27b` |
-| `FALLBACK_MODEL` | Variable | Fallback model name override | No | `gemini-2.5-flash-lite` |
+| `PRIMARY_MODEL` | Variable | Primary model name (restricted to `ALLOWED_PRIMARY_MODELS`: `qwen/qwen3.8-27b`) | No | `qwen/qwen3.8-27b` |
+| `FALLBACK_MODEL` | Variable | Fallback model name (restricted to `ALLOWED_FALLBACK_MODELS`: `gemini-2.5-flash-lite`) | No | `gemini-2.5-flash-lite` |
+
+> [!NOTE]
+> `PRIMARY_MODEL` and `FALLBACK_MODEL` are validated against strict environment allowlists (`ALLOWED_PRIMARY_MODELS` and `ALLOWED_FALLBACK_MODELS`). For the MVP, only the verified models (`qwen/qwen3.8-27b` for primary Groq and `gemini-2.5-flash-lite` for fallback Gemini) are permitted. Configuring any other model string causes `validateEnvironment()` to reject the configuration with HTTP 500.
 
 ### Secret Management Commands
 Secrets must never be committed to source control. Set secrets in production using Wrangler:
