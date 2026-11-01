@@ -158,8 +158,8 @@ budget, but parsing and validating large payloads does. Benchmark parsing near t
 10 MB payload ceiling during implementation; calibrate payload bounds or adopt
 streaming validation if parsing approaches the CPU budget.
 
-For every target, verify that the ingress does not buffer SSE, client disconnects
-cancel upstream work, and proxy timeouts exceed the gateway's bounded deadline.
+For every target, verify that client disconnects cancel upstream work and proxy
+timeouts exceed the gateway's bounded deadline.
 Keep deployment configuration version-controlled and credentials outside it.
 
 ### Selected Target: Cloudflare Workers (TypeScript / Hono)

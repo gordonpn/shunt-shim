@@ -31,7 +31,7 @@ authentication headers elsewhere in the client do not prove OpenAI-mode support.
 ## HTTP and request contract
 
 - `POST /v1/chat/completions` and `POST /chat/completions` execute the same handler,
-  with identical auth, validation, routing, errors, JSON, and SSE behavior.
+  with identical auth, validation, routing, errors, and non-streaming JSON behavior.
 - `GET /v1/models` returns exactly `fast`. Model names are configured opaque
   aliases, not an OpenAI model-name allowlist or arbitrary provider bypass.
 - Accept `Authorization: Bearer <token>` or `x-api-key: <token>` against one
