@@ -29,7 +29,8 @@ The MVP presents an OpenAI Chat Completions HTTP interface to client application
                 v                             v
 +-------------------------------+ +-----------------------------------+
 |             Groq              | |         Google AI Studio          |
-|   Primary: qwen/qwen3.8-27b   | | Fallback: gemini-2.5-flash-lite   |
+| Default Primary:              | | Default Fallback:                 |
+|   qwen/qwen3.8-27b            | |   gemini-2.5-flash-lite           |
 +-------------------------------+ +-----------------------------------+
 ```
 
@@ -72,9 +73,9 @@ The request pipeline runs the following validation and routing steps:
 6. Streaming Guard ------------> [400 unsupported_parameter if stream: true or stream_options supplied]
        |
        v
-7. Primary Dispatch (Groq) ----> [Attempt primary qwen/qwen3.8-27b with 5s connect timeout]
+7. Primary Dispatch -----------> [Attempt primary provider (default: Groq qwen/qwen3.8-27b) with 5s timeout]
        |
-       +--> [On 429 / 503 / Timeout / Network Error] -> Fallback to Gemini (gemini-2.5-flash-lite)
+       +--> [On 429 / 503 / Timeout / Network Error] -> Fallback provider (default: Gemini gemini-2.5-flash-lite)
        |
        v
 8. Response Normalization -----> [Normalize JSON body and extract usage/tools]
@@ -105,9 +106,9 @@ The request must contain a non-empty `messages` array with valid roles (`system`
 Streaming completions are deferred beyond the MVP. If the parsed request body contains `"stream": true`, the gateway returns HTTP 400 Bad Request with code `unsupported_parameter` and param `stream`. If `stream_options` is supplied, the gateway returns HTTP 400 Bad Request with code `unsupported_parameter` and param `stream_options`.
 
 ### Stage 7: Upstream Dispatch and Bounded Fallback
-- **Attempt 1 (Primary):** Dispatches to Groq `qwen/qwen3.8-27b` using `https://api.groq.com/openai/v1/chat/completions`. A 5s connection timeout aborts stagnant handshakes.
-- **Eligible Failures:** Upstream HTTP 429 (rate limit), HTTP 503 (service unavailable), connection timeout, or network fetch failure trigger fallback.
-- **Attempt 2 (Fallback):** Dispatches to Google AI Studio `gemini-2.5-flash-lite` using `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`.
+- **Attempt 1 (Primary):** Dispatches to the configured primary provider (default: Groq `qwen/qwen3.8-27b` using `https://api.groq.com/openai/v1/chat/completions`). A 5s connection and header timeout aborts stagnant handshakes.
+- **Eligible Failures:** Upstream HTTP 429 (rate limit), HTTP 503 (service unavailable), connection/header timeout, or network fetch failure trigger fallback.
+- **Attempt 2 (Fallback):** Dispatches to the configured fallback provider (default: Google AI Studio `gemini-2.5-flash-lite` using `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`). Setting `PRIMARY_PROVIDER=gemini` swaps provider order at runtime.
 - **Wall-Clock Deadline:** The gateway enforces a strict 60s total request deadline across all attempts. If the deadline expires, in-flight fetches are aborted immediately, returning HTTP 504 `gateway_timeout`.
 - **Pre-dispatch Rejections:** Pre-dispatch failures (HTTP 400, 401, 404, 405, 413) omit provider and model metadata rather than fabricating uncontacted provider names.
 
@@ -120,8 +121,10 @@ The MVP focuses on two high-capacity free-tier providers:
 
 | Provider | Model | Quota Limits | Role |
 | :--- | :--- | :--- | :--- |
-| Groq | `qwen/qwen3.8-27b` | 1,000 RPD, 30 RPM, 8,000 TPM | Primary Route |
-| Google AI Studio | `gemini-2.5-flash-lite` | 1,000 RPD, 15 RPM | Fallback Route |
+| Groq | `qwen/qwen3.8-27b` | 1,000 RPD, 30 RPM, 8,000 TPM | Default Primary Route |
+| Google AI Studio | `gemini-2.5-flash-lite` | 1,000 RPD, 15 RPM | Default Fallback Route |
+
+By default, Groq serves as the primary provider and Google AI Studio serves as the fallback. Setting `PRIMARY_PROVIDER=gemini` in worker environment variables swaps their roles at runtime, making Google AI Studio the primary provider and Groq the fallback.
 
 `qwen/qwen3.8-27b` is pinned because it provides low-latency execution and reliably supports all four tool choice modes (`auto`, `required`, named, `none`) without upstream failure. `gemini-2.5-flash-lite` provides generous free token allowances and a massive context window as an automated backup.
 

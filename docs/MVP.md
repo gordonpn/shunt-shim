@@ -30,7 +30,7 @@ If every eligible provider is exhausted, return an explicit error.
 | Models | Explicit allowlist of models verified available on the configured accounts' free tiers |
 | Responses | Non-streaming JSON (streaming SSE deferred to post-MVP; stream: true rejected with HTTP 400 unsupported_parameter) |
 | Coding support | System/user/assistant/tool messages, function tools, tool results, both token-limit fields, optional reasoning metadata and usage |
-| Failover | At most one fallback attempt, on upstream HTTP 429, HTTP 503, connect failure / 5s fetch timeout within 60s total deadline |
+| Failover | At most one fallback attempt, on upstream HTTP 429, HTTP 503, connect failure / 5s connect or header timeout within 60s total deadline |
 | Safety | Authentication and payload validation before upstream dispatch; body limits, bounded timeouts, and cancellation |
 | Diagnostics | Provider, actual model, status, latency, and fallback reason; no prompts, completions, or credentials |
 

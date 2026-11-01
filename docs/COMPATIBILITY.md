@@ -76,7 +76,7 @@ extensions at dispatch. Native Anthropic adapters and a general provider IR are 
 | Inbound Request Body Limit | 10,485,760 | bytes (10 MB) | Immediate HTTP 413 `payload_too_large` response prior to JSON parse; zero upstream dispatch. On the Workers Free plan (10 ms CPU limit), parsing near-limit payloads will be benchmarked; streaming parsing or payload ceiling calibration applies if parsing approaches CPU budget. |
 | Shared Context Window Ceiling | 128,000 | tokens | Combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq context on pinned primary model `qwen/qwen3.8-27b` (128k context). PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` prior to upstream dispatch. |
 | Max Output Tokens Bound | 8,192 | tokens | Accepted in `max_tokens` or `max_completion_tokens`. Both Groq and Gemini support up to 8,192 completion tokens. |
-| Upstream Connect / Attempt Timeout | 5,000 | ms (5s) | Per-attempt connection and fetch timeout. Connection failure or reaching the 5s timeout on Attempt 1 triggers eligible fallback before response commitment. |
+| Upstream Connect / Attempt Timeout | 5,000 | ms (5s) | Per-attempt connection and header timeout. Connection failure or reaching the 5s timeout on Attempt 1 triggers eligible fallback before response commitment. |
 | Total Gateway Deadline | 60,000 | ms (60s) | Bounded wall-clock deadline across all attempts. Expiration before response commitment terminates request with HTTP 504 `gateway_timeout`. |
 
 Client and ingress timeout alignment:
@@ -93,7 +93,9 @@ Validation checks run in the following strict sequential pipeline before upstrea
 2. **HTTP Method**: Matched routes requested with unsupported HTTP methods return HTTP 405 Method Not Allowed (`invalid_request_error`) with an `Allow` header prior to authentication.
 3. **Gateway Authentication**: Requests to supported routes with missing, malformed, or invalid credentials return HTTP 401 Unauthorized (`invalid_api_key`).
 4. **Inbound Body Size**: Authenticated requests exceeding 10,485,760 bytes return HTTP 413 Payload Too Large (`payload_too_large`) prior to JSON parsing.
-5. **Payload Schema & Model Alias**: Authenticated requests within size limits are parsed. Malformed JSON or invalid schema (empty messages, unknown roles, or invalid tool calls) returns HTTP 400 Bad Request (`invalid_request_error`). Unknown model aliases (any string other than `fast`) return HTTP 404 Not Found (`model_not_found`). Combined token budgets exceeding 128,000 return HTTP 400 Bad Request (`context_length_exceeded`).
+5. **Payload Schema & Model Alias**: Authenticated requests within size limits are parsed. Malformed JSON or invalid schema (empty messages, unknown roles, or invalid tool calls) returns HTTP 400 Bad Request (`invalid_request_error`). Unknown model aliases (any string other than `fast`) return HTTP 404 Not Found (`model_not_found`).
+6. **Streaming Parameter Rejection**: Validated requests specifying `stream: true` or `stream_options` return HTTP 400 Bad Request (`unsupported_parameter`) prior to token budget calculation and upstream dispatch.
+7. **Context & Token Bounds**: Combined token budgets exceeding 128,000 return HTTP 400 Bad Request (`context_length_exceeded`).
 
 ### Unsupported methods and endpoints
 
@@ -105,6 +107,7 @@ Validation checks run in the following strict sequential pipeline before upstrea
 | Supported route | Supported method | 401 Unauthorized | `invalid_api_key` | Evaluated at step 3. Missing, malformed, or mismatching credentials. |
 | Supported route | Supported method | 413 Payload Too Large | `payload_too_large` | Evaluated at step 4. Body size > 10,485,760 bytes. Zero upstream invocation. |
 | `/v1/chat/completions`, `/chat/completions` | POST | 404 Not Found | `model_not_found` | Evaluated at step 5. Unknown model alias (model string other than `fast`). |
+| `/v1/chat/completions`, `/chat/completions` | POST | 400 Bad Request | `unsupported_parameter` | Evaluated at step 6. Streaming parameter specified (`stream: true` or `stream_options`). |
 
 ## Response and failure contract
 
@@ -144,7 +147,7 @@ The downstream commitment point is defined as the moment the gateway flushes HTT
 
 ### Mixed-failure mapping and observable outcomes
 
-When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s fetch timeout) before downstream response commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 60s total deadline.
+When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect or header timeout) before downstream response commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 60s total deadline.
 
 The returned HTTP status code and OpenAI-compatible error object match the final failing attempt:
 
