@@ -94,8 +94,8 @@ Validation checks run in the following strict sequential pipeline before upstrea
 3. **Gateway Authentication**: Requests to supported routes with missing, malformed, or invalid credentials return HTTP 401 Unauthorized (`invalid_api_key`).
 4. **Inbound Body Size**: Authenticated requests exceeding 10,485,760 bytes return HTTP 413 Payload Too Large (`payload_too_large`) prior to JSON parsing.
 5. **Payload Schema & Model Alias**: Authenticated requests within size limits are parsed. Malformed JSON or invalid schema (empty messages, unknown roles, or invalid tool calls) returns HTTP 400 Bad Request (`invalid_request_error`). Unknown model aliases (any string other than `fast`) return HTTP 404 Not Found (`model_not_found`).
-6. **Streaming Parameter Rejection**: Validated requests specifying `stream: true` or `stream_options` return HTTP 400 Bad Request (`unsupported_parameter`) prior to token budget calculation and upstream dispatch.
-7. **Context & Token Bounds**: Combined token budgets exceeding 128,000 return HTTP 400 Bad Request (`context_length_exceeded`).
+6. **Context & Token Bounds**: Combined token budgets exceeding 128,000 return HTTP 400 Bad Request (`context_length_exceeded`).
+7. **Streaming Parameter Rejection**: Validated requests specifying `stream: true` or `stream_options` return HTTP 400 Bad Request (`unsupported_parameter`) prior to upstream dispatch.
 
 ### Unsupported methods and endpoints
 
@@ -107,7 +107,7 @@ Validation checks run in the following strict sequential pipeline before upstrea
 | Supported route | Supported method | 401 Unauthorized | `invalid_api_key` | Evaluated at step 3. Missing, malformed, or mismatching credentials. |
 | Supported route | Supported method | 413 Payload Too Large | `payload_too_large` | Evaluated at step 4. Body size > 10,485,760 bytes. Zero upstream invocation. |
 | `/v1/chat/completions`, `/chat/completions` | POST | 404 Not Found | `model_not_found` | Evaluated at step 5. Unknown model alias (model string other than `fast`). |
-| `/v1/chat/completions`, `/chat/completions` | POST | 400 Bad Request | `unsupported_parameter` | Evaluated at step 6. Streaming parameter specified (`stream: true` or `stream_options`). |
+| `/v1/chat/completions`, `/chat/completions` | POST | 400 Bad Request | `unsupported_parameter` | Evaluated at step 7. Streaming parameter specified (`stream: true` or `stream_options`). |
 
 ## Response and failure contract
 
@@ -147,7 +147,7 @@ The downstream commitment point is defined as the moment the gateway flushes HTT
 
 ### Mixed-failure mapping and observable outcomes
 
-When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect or header timeout) before downstream response commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 60s total deadline.
+When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect or header timeout, or network fetch failure) before downstream response commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 60s total deadline.
 
 The returned HTTP status code and OpenAI-compatible error object match the final failing attempt:
 
@@ -155,14 +155,16 @@ The returned HTTP status code and OpenAI-compatible error object match the final
 | :--- | :--- | :--- | :--- | :--- |
 | 429 Too Many Requests | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 503 Service Unavailable | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
-| Connect / Fetch Timeout (5s) | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| Connect / Header Timeout (5s) | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| Network Fetch Failure | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 429 Too Many Requests | 429 Too Many Requests | 429 | `rate_limit_exceeded` | All providers rate-limited; preserve `Retry-After` from final attempt. |
 | 429 Too Many Requests | 503 Service Unavailable | 503 | `service_unavailable` | Final attempt unavailable; return 503 error. |
 | 503 Service Unavailable | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | 503 Service Unavailable | 503 Service Unavailable | 503 | `service_unavailable` | Both providers unavailable; return 503 error. |
-| Eligible failure (429/503/timeout) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
-| Connect / Fetch Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
-| Connect / Fetch Timeout (5s) | Connect / Fetch Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
+| Eligible failure (429/503/timeout/network) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
+| Connect / Header Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
+| Connect / Header Timeout (5s) | Connect / Header Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
+| Network Fetch Failure | Network Fetch Failure | 502 | `bad_gateway` | Both provider network fetches failed; return 502 error. |
 | 400 Bad Request | (No fallback) | 502 | `bad_gateway` | Upstream validation failure; do not retry; return 502 error. |
 | 401 / 403 Unauthorized | (No fallback) | 502 | `bad_gateway` | Upstream credential failure; do not expose upstream keys; return 502 error. |
 | Headers committed (200 OK) | Connection reset / drop | 200 | (Aborted) | Response already in transit; zero fallback replay. |
