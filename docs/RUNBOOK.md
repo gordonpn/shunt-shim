@@ -53,16 +53,22 @@ just generate-token
    ```
    The local edge server listens by default at `http://127.0.0.1:8787`.
 
-### Secret Rotation and Zero-Downtime Updates
-To rotate gateway tokens without downtime:
+### Coordinated Secret Rotation
+Because the MVP enforces single-token authentication via exact string comparison in `authMiddleware`, rotating the gateway secret causes active clients presenting the old token to receive HTTP 401 until their configuration is updated. Overlapping multi-token support is deferred to post-MVP.
+
+To execute a coordinated token rotation:
 1. Generate a new secret: `just generate-token`.
-2. Update Cloudflare Workers secrets:
+2. Prepare updated client configurations in downstream runners (for example, repository secrets for DeepSeek Reviewer, OpenCodeReview, or PR-Agent).
+3. Update the Cloudflare Workers secret:
    ```bash
    GATEWAY_TOKENS="<new-token>" pnpm exec wrangler secret put GATEWAY_TOKENS
    ```
    Or update `.dev.vars` and run `just provision-secrets`.
-3. Cloudflare Workers atomically propagates the new secret version across edge nodes within seconds.
-4. Update downstream client configurations (DeepSeek Reviewer, OpenCodeReview, PR-Agent) with the new bearer token.
+4. Immediately apply the new bearer token to downstream client configurations.
+5. Verify ingress connectivity and authentication with the new credential:
+   ```bash
+   just verify-ingress https://shunt-shim.<subdomain>.workers.dev <new-token>
+   ```
 
 ## 3. Production Deployment to Cloudflare Workers
 
