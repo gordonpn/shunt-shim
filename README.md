@@ -1,44 +1,46 @@
 # shunt-shim
 
-Status: Cloudflare Worker service bootstrapped with reproducible quality gates. See [the proposed MVP and deployment options](docs/MVP.md) for the initial scope, acceptance criteria, and language/platform trade-offs. The capabilities and setup instructions below describe the implemented foundation and planned routing.
+Status: Cloudflare Worker service implemented with reproducible quality gates. See [MVP scope and acceptance criteria](docs/MVP.md) and [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the active runtime architecture, verification gates, and platform trade-offs.
 
-`shunt-shim` is a planned OpenAI-compatible routing shim for free-tier large language model (LLM) providers. The MVP exposes one `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. Cloudflare Workers (TypeScript / Hono) has been accepted and bootstrapped as the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md)). Model fallback and provider adaptation strategies are documented in [ADR 0002](docs/adr/0002-model-fallback-and-provider-adaptation-strategy.md).
+`shunt-shim` is an OpenAI-compatible routing gateway for free-tier large language model (LLM) providers. The MVP exposes a `/v1/chat/completions` endpoint backed by Groq with Google AI Studio as fallback. Cloudflare Workers (TypeScript / Hono) is the target deployment runtime (see [ADR 0001](docs/adr/0001-runtime-target-and-shared-request-bounds.md) and [ARCHITECTURE.md](docs/ARCHITECTURE.md)). Model fallback and provider adaptation strategies are documented in [ADR 0002](docs/adr/0002-model-fallback-and-provider-adaptation-strategy.md).
 
 The goal is to let DeepSeek Review, OpenCodeReview, and PR-Agent use one endpoint without client code changes. Compatibility requires deployed evidence for all three, including OpenCodeReview's tool-call round trip. See the [pinned client sources and contract](docs/COMPATIBILITY.md).
 
 ```
-Client -> Proposed gateway -> Groq
-                          -> Google AI Studio (fallback)
+Client -> Gateway (fast alias) -> Groq (Primary: qwen/qwen3.8-27b)
+                                -> Google AI Studio (Fallback: gemini-2.5-flash-lite)
 ```
 
-## Proposed MVP Capabilities
+## Implemented MVP Capabilities
 
-- OpenAI-compatible `/v1/chat/completions`, its `/chat/completions` alias, and `/v1/models`.
-- One `fast` alias routing to explicitly allowed free-tier models on Groq and Google AI Studio.
-- Non-streaming JSON, incremental SSE, tool calls, and tool-result messages.
-- One bounded fallback attempt on upstream HTTP 429, HTTP 503, or a connection timeout, only before committing the downstream response.
-- One random gateway secret via Bearer or `x-api-key`, core validation, permissive extensions, body limits, deadlines, and cancellation.
-- Diagnostics that exclude prompts, completions, and credentials.
+- OpenAI-compatible `/v1/chat/completions`, its `/chat/completions` alias, and `GET /v1/models` (catalog returning `fast`).
+- One virtual alias, `fast`, routing to primary Groq (`qwen/qwen3.8-27b`) and fallback Google AI Studio (`gemini-2.5-flash-lite`).
+- Non-streaming JSON responses, function tool calls, and tool-result message validation.
+- Deterministic HTTP 400 `unsupported_parameter` rejection when `stream: true` or `stream_options` are supplied (streaming is deferred to post-MVP).
+- At most one bounded fallback attempt on upstream HTTP 429, HTTP 503, connection timeout (5s), or network error before committing the response.
+- One random gateway secret configured in `GATEWAY_TOKENS`, accepted via Bearer auth or `x-api-key`.
+- Strict request bounds: 10 MB body limit, 128,000 context ceiling, 8,192 max completion tokens, 5s connect timeout, 60s total deadline, and client disconnect cancellation.
+- Safe structured JSON diagnostics with request IDs, status, latency, provider, model, attempts, and fallback reasons; zero logging of prompts, completions, tool payloads, or credentials.
 
-If all eligible providers are exhausted, the gateway must return an explicit error. It cannot guarantee uninterrupted access or additional quota.
+If all eligible providers are exhausted, the gateway returns an explicit error. It does not create additional quota or guarantee uninterrupted access.
 
-Shared accounting, proactive quota checks, tenant priorities, context routing, `deep` and `reasoning` aliases, OpenRouter, and Workers AI are deferred. Cloudflare KV is eventually consistent and lacks atomic counter updates, so it cannot reliably enforce global quotas under concurrency. If strict coordination becomes necessary on Workers, evaluate Durable Objects instead.
+Shared accounting, proactive quota checks, tenant priorities, context routing, `deep` and `reasoning` aliases, OpenRouter, and Workers AI are deferred. The MVP requires no database, KV namespace, or multi-tenant token catalog.
 
 ## Free-Tier Provider Summary
 
-| Provider | Top Models | Free Quotas | Context | Primary Strength | Constraints |
+| Provider | Top Models | Free Quotas | Context | Primary Strength | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| Google AI Studio | Gemini 2.5 / 3.8 Flash, Flash-Lite | Free input/output tokens on eligible models; 1,000 RPD (Flash-Lite) | 1,000,000 tokens | Massive token context, multimodal inputs | Quotas reset at 00:00 UTC; free tier prompts subject to model training |
-| Groq | GPT-OSS 120B/20B, Qwen, Llama 3.3 | 1,000 RPD, 30 RPM, 8,000 TPM | 128,000 tokens | Ultra-low latency inference | Enforces strict rolling per-minute token buckets (TPM) |
-| OpenRouter (:free) | DeepSeek R1, Llama 3.3 70B, Qwen 2.5 | 50 RPD (free tier), 1,000 RPD ($10+ credits) | Up to 128k-1M tokens | Unified catalog for open-weight frontier models | Shared public capacity subject to queue latency |
-| Cloudflare Workers AI | Gemma, GLM, Nemotron, Llama 3.3 | 10,000 Neurons/day (~1,000 queries) | 8k-128k tokens | Native edge invocation without credential management | Lower context windows |
-| Vercel AI Gateway | Multi-provider catalog | $5/month recurring credits | Model dependent | Testing commercial models with monthly credit | Credit ends if account converts to paid |
+| Groq | Qwen 2.5 32B (`qwen/qwen3.8-27b`) | 1,000 RPD, 30 RPM, 8,000 TPM | 128,000 tokens | Low latency inference, reliable function tool calling | Primary Route |
+| Google AI Studio | Gemini 2.5 Flash-Lite (`gemini-2.5-flash-lite`) | 1,000 RPD, 15 RPM | 1,000,000 tokens | Free input/output tokens, high context window | Fallback Route |
+| OpenRouter (:free) | DeepSeek R1, Llama 3.3 70B, Qwen 2.5 | 50 RPD (free tier), 1,000 RPD ($10+ credits) | Up to 128k-1M tokens | Unified open-weights catalog | Deferred |
+| Cloudflare Workers AI | Gemma, GLM, Nemotron, Llama 3.3 | 10,000 Neurons/day (~1,000 queries) | 8k-128k tokens | Native edge invocation | Deferred |
+| Vercel AI Gateway | Multi-provider catalog | $5/month recurring credits | Model dependent | Commercial model testing | Deferred |
 
-For a comprehensive catalog of always-free compute, storage, edge networks, and LLMs, consult [docs/FREE_TIERS.md](docs/FREE_TIERS.md).
+For an inventory of always-free compute, storage, edge networks, and LLMs, consult [docs/FREE_TIERS.md](docs/FREE_TIERS.md).
 
 ## Cloudflare Quickstart
 
-The Worker entrypoint and Wrangler configuration are runnable. Follow the steps below to run locally or verify quality gates. The MVP requires no KV namespace.
+The Worker entrypoint and Wrangler configuration are runnable locally and verified through test suites.
 
 ### 1. Prerequisites
 - `node` (v22+) and `pnpm` (v10+)
@@ -47,13 +49,13 @@ The Worker entrypoint and Wrangler configuration are runnable. Follow the steps 
 - Free API keys from [Google AI Studio](https://aistudio.google.com) and [Groq](https://console.groq.com)
 
 ### 2. Local Setup
-Install dependencies and set up local development variables:
+Install dependencies and configure local environment variables:
 ```bash
 pnpm install
 cp .env.example .dev.vars
 ```
 
-Edit `.dev.vars` to include your provider keys:
+Edit `.dev.vars` with your provider keys and a random gateway secret:
 ```ini
 GEMINI_API_KEY="AIzaSy..."
 GROQ_API_KEY="gsk_..."
@@ -67,40 +69,38 @@ just typecheck
 just test
 just dev
 ```
-The gateway will start listening on `http://127.0.0.1:8787`.
+The gateway will listen locally on `http://127.0.0.1:8787`.
 
 ### 3. Deploy to Cloudflare Workers
-Store secrets and deploy to the edge:
+Provision edge secrets and deploy:
 ```bash
-# Store upstream credentials securely as edge secrets
 pnpm exec wrangler secret put GEMINI_API_KEY
 pnpm exec wrangler secret put GROQ_API_KEY
 pnpm exec wrangler secret put GATEWAY_TOKENS
 
-# Deploy to Cloudflare edge
 just deploy
 ```
 
-For detailed deployment procedures, refer to [docs/RUNBOOK.md](docs/RUNBOOK.md).
+For operational procedures and diagnostics runbook, refer to [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
-## Planned Client Integration
+## Client Integration
 
-| Review client | Gateway setting | Model |
-| :--- | :--- | :--- |
-| `hustcer/deepseek-review@v1` | `base-url=https://proxy.example.com/v1` | `fast` |
-| `alibaba/open-code-review` | `llm_protocol=openai`, `llm_url=https://proxy.example.com/v1/chat/completions` | `fast` |
-| `The-PR-Agent/pr-agent` | `openai.api_base=https://proxy.example.com/v1` | `openai/fast` |
+All target clients must configure non-streaming completions (`stream: false` or omitted) against the gateway endpoint `/v1/chat/completions` using the `fast` model alias:
 
-Use the gateway credential, not a provider key. Follow the
-[complete configuration and evidence requirements](docs/COMPATIBILITY.md),
-including PR-Agent's context limit and gateway-only fallback settings.
+| Review client | Gateway setting | Model | Stream Mode |
+| :--- | :--- | :--- | :--- |
+| `hustcer/deepseek-review@v1` | `base-url=https://proxy.example.com/v1` | `fast` | Non-streaming (Action default) |
+| `alibaba/open-code-review` | `llm_protocol=openai`, `llm_url=https://proxy.example.com/v1/chat/completions` | `fast` | Non-streaming (`stream=false`) |
+| `The-PR-Agent/pr-agent` | `openai.api_base=https://proxy.example.com/v1` | `openai/fast` | Non-streaming (`config.custom_model_max_tokens=128000`) |
+
+Use the gateway credential configured in `GATEWAY_TOKENS`, not upstream provider keys. Follow the [complete configuration and evidence requirements](docs/COMPATIBILITY.md).
 
 ## Documentation Roadmap
 
-- [docs/AUTOMATION.md](docs/AUTOMATION.md): All six imported GitHub Actions, file guards, review secrets, coverage/CodeQL setup, and local verification with `mise exec -- just check-workflows`.
-- [docs/MVP.md](docs/MVP.md): Proposed MVP scope, acceptance criteria, language choices, and deployment alternatives.
+- [docs/AUTOMATION.md](docs/AUTOMATION.md): All imported GitHub Actions, file guards, review secrets, coverage/CodeQL setup, and local verification with `mise exec -- just check-workflows`.
+- [docs/MVP.md](docs/MVP.md): MVP scope, acceptance criteria, language choices, and deployment alternatives.
 - [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md): Canonical request/response contract, pinned client sources, configuration, and evidence requirements.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Edge topology, multi-project synchronization, request lifecycle, context heuristics, and protocol translation.
-- [docs/FREE_TIERS.md](docs/FREE_TIERS.md): Comprehensive inventory of always-free compute, storage, database, and LLM tiers.
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): Proposed configuration variables, Wrangler settings, virtual aliases, tenant tokens, and deferred accounting.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Edge topology, request lifecycle, timeout bounds, and schema adaptation.
+- [docs/FREE_TIERS.md](docs/FREE_TIERS.md): Inventory of always-free compute, storage, database, and LLM tiers.
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): Configuration variables, Wrangler settings, virtual aliases, and request limits.
 - [docs/RUNBOOK.md](docs/RUNBOOK.md): Setup instructions, deployment steps, smoke tests, observability, and incident diagnostics.
