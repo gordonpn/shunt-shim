@@ -15,7 +15,9 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "verify-ingress": "node --experimental-strip-types scripts/verify-ingress.ts",
+    "generate-token": "node --experimental-strip-types scripts/generate-token.ts"
   },
   "dependencies": {
     "hono": "^4.7.2"
