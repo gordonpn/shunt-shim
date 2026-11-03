@@ -36,9 +36,35 @@ check-format:
 lint:
     pnpm run lint
 
+# Generate a cryptographically secure random token for GATEWAY_TOKENS
+generate-token:
+    @node --experimental-strip-types scripts/generate-token.ts
+
+# Provision runtime secrets from environment to Cloudflare Workers
+provision-secrets: check-secrets
+    @printf "%s" "$GATEWAY_TOKENS" | pnpm exec wrangler secret put GATEWAY_TOKENS
+    @printf "%s" "$GEMINI_API_KEY" | pnpm exec wrangler secret put GEMINI_API_KEY
+    @printf "%s" "$GROQ_API_KEY" | pnpm exec wrangler secret put GROQ_API_KEY
+
 # Deploy edge worker to Cloudflare
 deploy:
     pnpm exec wrangler deploy
+
+# Inspect deployment history
+deployments:
+    pnpm exec wrangler deployments list
+
+# Rollback worker deployment to previous or specified version
+rollback deployment_id="":
+    pnpm exec wrangler rollback {{ if deployment_id != "" { deployment_id } else { "" } }} -y
+
+# Verify ingress endpoints and conformance
+verify-ingress url token="":
+    node --experimental-strip-types scripts/verify-ingress.ts {{ url }} {{ if token != "" { "--token " + token } else { "" } }}
+
+# Verify ingress endpoints with live end-to-end chat completion
+verify-ingress-live url token="":
+    node --experimental-strip-types scripts/verify-ingress.ts {{ url }} --live {{ if token != "" { "--token " + token } else { "" } }}
 
 # Inspect real-time edge runtime logs
 tail:
@@ -97,4 +123,4 @@ review-workflows:
 # Resolve deterministic OCR coverage and review rules for source code
 review-code:
     ocr delegate preview --format json
-    ocr delegate rule --format json package.json tsconfig.json biome.json wrangler.jsonc vitest.config.ts src/*.ts test/*.ts
+    ocr delegate rule --format json package.json tsconfig.json biome.json wrangler.jsonc vitest.config.ts src/*.ts test/*.ts scripts/*.ts
