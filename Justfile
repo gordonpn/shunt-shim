@@ -42,9 +42,9 @@ generate-token:
 
 # Provision runtime secrets from environment to Cloudflare Workers
 provision-secrets: check-secrets
-    @printf "%s" "$GATEWAY_TOKENS" | pnpm exec wrangler secret put GATEWAY_TOKENS
     @printf "%s" "$GEMINI_API_KEY" | pnpm exec wrangler secret put GEMINI_API_KEY
     @printf "%s" "$GROQ_API_KEY" | pnpm exec wrangler secret put GROQ_API_KEY
+    @printf "%s" "$GATEWAY_TOKENS" | pnpm exec wrangler secret put GATEWAY_TOKENS
 
 # Deploy edge worker to Cloudflare
 deploy:
@@ -59,12 +59,12 @@ rollback deployment_id="":
     pnpm exec wrangler rollback {{ if deployment_id != "" { deployment_id } else { "" } }} -y
 
 # Verify ingress endpoints and conformance
-verify-ingress url token="":
-    node --experimental-strip-types scripts/verify-ingress.ts {{ url }} {{ if token != "" { "--token " + token } else { "" } }}
+verify-ingress url:
+    node --experimental-strip-types scripts/verify-ingress.ts {{ url }}
 
 # Verify ingress endpoints with live end-to-end chat completion
-verify-ingress-live url token="":
-    node --experimental-strip-types scripts/verify-ingress.ts {{ url }} --live {{ if token != "" { "--token " + token } else { "" } }}
+verify-ingress-live url:
+    node --experimental-strip-types scripts/verify-ingress.ts {{ url }} --live
 
 # Inspect real-time edge runtime logs
 tail:
@@ -93,6 +93,7 @@ test-secrets:
 
 # Validate repository automation without application code or secrets
 check-workflows: lint-workflows test-secrets
+    grep -Eq '^[[:space:]]*"enable_request_signal"' wrangler.jsonc
     shellcheck .github/scripts/*.sh
     git diff --check $(git hash-object -t tree /dev/null)
     git diff --cached --check

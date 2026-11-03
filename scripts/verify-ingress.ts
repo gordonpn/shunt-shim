@@ -20,6 +20,8 @@ export interface IngressVerifySummary {
   results: ProbeOutcome[];
 }
 
+const LIVE_PROBE_TIMEOUT_MS = 65_000;
+
 /**
  * Normalizes a base URL by removing any trailing slashes.
  *
@@ -246,6 +248,15 @@ export async function runIngressVerification(
       timeoutMs,
     ),
   );
+
+  if (options.live && !token) {
+    results.push({
+      name: "POST /v1/chat/completions (live end-to-end completion)",
+      passed: false,
+      message: "--live requires a token. Set GATEWAY_TOKENS or pass --token.",
+      durationMs: 0,
+    });
+  }
 
   // Protected route probes require valid credentials
   if (token) {
@@ -533,7 +544,7 @@ export async function runIngressVerification(
               message: `Completed with ID: ${body.id ?? "unknown"}`,
             };
           },
-          Math.max(timeoutMs, 30000),
+          Math.max(timeoutMs, LIVE_PROBE_TIMEOUT_MS),
         ),
       );
     }
@@ -583,13 +594,13 @@ export function reportSummary(summary: IngressVerifySummary): number {
  * Parses command-line arguments for the verification CLI.
  *
  * @param argv - Command-line arguments.
- * @returns Parsed options or null if help was requested or arguments are invalid.
+ * @returns Parsed options, or `help` or `invalid` for non-executing CLI results.
  */
 export function parseArgs(
   argv: string[],
 ): IngressVerifyOptions | "help" | "invalid" {
   let baseUrl: string | undefined;
-  let token: string | undefined = process.env.GATEWAY_TOKENS;
+  let token = process.env.GATEWAY_TOKENS?.trim() || undefined;
   let live = false;
   let timeoutMs: number | undefined;
 
@@ -612,31 +623,41 @@ export function parseArgs(
     }
 
     if (arg === "--token") {
-      token = argv[i + 1];
+      const value = argv[i + 1]?.trim();
+      if (!value || value.startsWith("-")) {
+        return "invalid";
+      }
+      token = value;
       i += 2;
       continue;
     }
 
     if (arg.startsWith("--token=")) {
-      token = arg.slice("--token=".length);
+      const value = arg.slice("--token=".length).trim();
+      if (!value) {
+        return "invalid";
+      }
+      token = value;
       i++;
       continue;
     }
 
     if (arg === "--timeout") {
-      const parsed = Number.parseInt(argv[i + 1] ?? "", 10);
-      if (!Number.isNaN(parsed) && parsed > 0) {
-        timeoutMs = parsed;
+      const parsed = Number(argv[i + 1]);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        return "invalid";
       }
+      timeoutMs = parsed;
       i += 2;
       continue;
     }
 
     if (arg.startsWith("--timeout=")) {
-      const parsed = Number.parseInt(arg.slice("--timeout=".length), 10);
-      if (!Number.isNaN(parsed) && parsed > 0) {
-        timeoutMs = parsed;
+      const parsed = Number(arg.slice("--timeout=".length));
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        return "invalid";
       }
+      timeoutMs = parsed;
       i++;
       continue;
     }
@@ -647,7 +668,7 @@ export function parseArgs(
       continue;
     }
 
-    i++;
+    return "invalid";
   }
 
   if (!baseUrl) {
@@ -687,7 +708,7 @@ async function main(): Promise<void> {
   }
 
   if (parsed === "invalid") {
-    process.stderr.write("Error: Missing required <baseUrl> argument.\n\n");
+    process.stderr.write("Error: Invalid or missing required arguments.\n\n");
     printUsage();
     process.exit(1);
     return;

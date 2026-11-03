@@ -59,6 +59,19 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
       expect(parseArgs(["--token", "xyz"])).toBe("invalid");
     });
 
+    it("rejects malformed options and unexpected arguments", () => {
+      expect(parseArgs(["http://localhost:8787", "--token"])).toBe("invalid");
+      expect(parseArgs(["http://localhost:8787", "--token="])).toBe("invalid");
+      expect(parseArgs(["http://localhost:8787", "--timeout=30s"])).toBe(
+        "invalid",
+      );
+      expect(parseArgs(["http://localhost:8787", "--timeout", "0"])).toBe(
+        "invalid",
+      );
+      expect(parseArgs(["http://localhost:8787", "--lve"])).toBe("invalid");
+      expect(parseArgs(["http://localhost:8787", "extra"])).toBe("invalid");
+    });
+
     it("parses baseUrl and options correctly", () => {
       const result = parseArgs([
         "http://localhost:8787",
@@ -242,6 +255,21 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
       expect(summary.failed).toBe(0);
     });
 
+    it("fails the requested live probe when token is omitted", async () => {
+      const summary = await runIngressVerification({
+        baseUrl: targetUrl,
+        live: true,
+      });
+
+      expect(summary.total).toBe(6);
+      expect(summary.passed).toBe(5);
+      expect(summary.failed).toBe(1);
+      expect(summary.results.at(-1)).toMatchObject({
+        passed: false,
+        message: "--live requires a token. Set GATEWAY_TOKENS or pass --token.",
+      });
+    });
+
     it("verifies live probe succeeds when --live is enabled", async () => {
       const summary = await runIngressVerification({
         baseUrl: targetUrl,
@@ -308,7 +336,7 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
       expect(healthProbe?.message).toContain("Missing expected x-request-id");
     });
 
-    it("reports failure when endpoint times out or is unreachable", async () => {
+    it("reports failure when endpoint is unreachable", async () => {
       vi.restoreAllMocks();
       vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
         throw new Error("fetch failed: connect ECONNREFUSED 127.0.0.1:1");
@@ -324,6 +352,36 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
       for (const result of summary.results) {
         expect(result.passed).toBe(false);
         expect(result.message).toContain("connect ECONNREFUSED");
+      }
+    });
+
+    it("reports a timeout when fetch remains pending until aborted", async () => {
+      vi.restoreAllMocks();
+      vi.useFakeTimers();
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new Error("aborted"));
+            });
+          }),
+      );
+
+      try {
+        const summaryPromise = runIngressVerification({
+          baseUrl: targetUrl,
+          timeoutMs: 10,
+        });
+        await vi.advanceTimersByTimeAsync(50);
+        const summary = await summaryPromise;
+
+        expect(summary.total).toBe(5);
+        expect(summary.failed).toBe(5);
+        for (const result of summary.results) {
+          expect(result.message).toBe("Timed out after 10ms");
+        }
+      } finally {
+        vi.useRealTimers();
       }
     });
   });

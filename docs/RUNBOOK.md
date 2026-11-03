@@ -61,13 +61,13 @@ To execute a coordinated token rotation:
 2. Prepare updated client configurations in downstream runners (for example, repository secrets for DeepSeek Reviewer, OpenCodeReview, or PR-Agent).
 3. Update the Cloudflare Workers secret:
    ```bash
-   GATEWAY_TOKENS="<new-token>" pnpm exec wrangler secret put GATEWAY_TOKENS
+   pnpm exec wrangler secret put GATEWAY_TOKENS
    ```
-   Or update `.dev.vars` and run `just provision-secrets`.
+   Enter the new token at Wrangler's prompt, or update `.dev.vars` and run `just provision-secrets`.
 4. Immediately apply the new bearer token to downstream client configurations.
 5. Verify ingress connectivity and authentication with the new credential:
    ```bash
-   just verify-ingress https://shunt-shim.<subdomain>.workers.dev <new-token>
+   just verify-ingress https://shunt-shim.<subdomain>.workers.dev
    ```
 
 ## 3. Production Deployment to Cloudflare Workers
@@ -119,14 +119,11 @@ just verify-ingress http://127.0.0.1:8787
 just verify-ingress https://shunt-shim.<subdomain>.workers.dev
 ```
 
-If `GATEWAY_TOKENS` is not exported in the shell environment, pass the token explicitly:
-```bash
-just verify-ingress https://shunt-shim.<subdomain>.workers.dev <your-token>
-```
+The recipes load `GATEWAY_TOKENS` from `.dev.vars`; do not pass it as a command-line argument.
 
 To execute a live end-to-end chat completion against the primary upstream model through the ingress route:
 ```bash
-just verify-ingress-live https://shunt-shim.<subdomain>.workers.dev <your-token>
+just verify-ingress-live https://shunt-shim.<subdomain>.workers.dev
 ```
 
 ### Automated Ingress Probes Executed
@@ -155,7 +152,7 @@ Expected response: HTTP 200 with `{"status":"ok","service":"shunt-shim"}`.
 #### Verify Virtual Models Catalog
 ```bash
 curl -s -X GET "http://127.0.0.1:8787/v1/models" \
-  -H "Authorization: Bearer ${GATEWAY_SECRET}" | jq .
+  -H "Authorization: Bearer ${GATEWAY_TOKENS}" | jq .
 ```
 Expected response:
 ```json
@@ -170,7 +167,7 @@ Expected response:
 #### Test Non-Streaming Chat Completion (`fast` alias)
 ```bash
 curl -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
-  -H "Authorization: Bearer ${GATEWAY_SECRET}" \
+  -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "fast",
@@ -185,7 +182,7 @@ Expected response: HTTP 200 with OpenAI-compatible JSON completion.
 Streaming is deferred to post-MVP. Verify that requests with `stream: true` are rejected with HTTP 400 Bad Request:
 ```bash
 curl -i -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
-  -H "Authorization: Bearer ${GATEWAY_SECRET}" \
+  -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "fast",
@@ -264,10 +261,9 @@ The service operates within defined platform and gateway constraints:
 | Inbound Body Size | 10 MB (10,485,760 bytes) | Inspected via `Content-Length` and stream byte count in `src/validation.ts`. Returns HTTP 413 `payload_too_large`. |
 | Workers CPU Limit | 10 ms CPU time per request (Free tier) | Non-blocking asynchronous I/O (network wait time is unmetered by Cloudflare Workers). |
 | Workers Request Quota | 100,000 requests per day (Free tier) | Cloudflare edge enforcement. Rate limits return HTTP 429 when exhausted. |
-| Ingress Proxy Timeout | 100 seconds (Cloudflare default) | Exceeds the gateway 60s total deadline, ensuring clean structured 504 timeouts before proxy aborts. |
 | Upstream Connect Timeout | 5 seconds per attempt | Enforced via `AbortSignal.any` with `timeout(5000)` on upstream fetch. Triggers fallback on primary timeout. |
 | Total Gateway Deadline | 60 seconds total request bound | Gateway aborts active requests and returns HTTP 504 `gateway_timeout`. |
-| Client Disconnect | Immediate upstream cancellation | `compatibility_flags = ["enable_request_signal"]` links client TCP disconnect to `Request.signal`, immediately aborting active upstream fetch calls. |
+| Client Disconnect | Request-signal propagation | `compatibility_flags = ["enable_request_signal"]` links client TCP disconnect to `Request.signal`; confirm deployed cancellation before relying on it operationally. |
 
 ## 7. Incident Handling and Diagnostics
 
@@ -281,4 +277,4 @@ The service operates within defined platform and gateway constraints:
 
 ### Client Disconnect
 - Symptom: Client aborts the request before completion.
-- Action: In-flight upstream fetches abort via linked `AbortController`. Zero attempts are recorded if aborted prior to dispatch.
+- Action: The unit suite verifies that the linked `AbortController` aborts active upstream work. Confirm the Workers request-signal path against deployed ingress before relying on that behavior operationally.
