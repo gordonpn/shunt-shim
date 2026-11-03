@@ -95,7 +95,7 @@ tests for all three clients. Each provider must pass successful cases independen
 | Upstream usage or optional reasoning_content is present or absent | A response is returned | Preserve supplied metadata without inventing token counts or requiring reasoning content |
 | A request with stream: true or stream_options supplied | A completion is requested | Return HTTP 400 unsupported_parameter before upstream dispatch |
 | A tool-capable request | The client sends tools and later their results | Preserve tool-call identifiers, arguments, result messages, and finish reasons in normalized JSON responses |
-| The primary returns 429 or 503, or times out before response commitment | The fallback succeeds | Make exactly one fallback attempt and return its response |
+| The primary returns 429 or 503, has a network fetch failure within the 60-second total deadline, or times out before response commitment | The fallback succeeds | Make exactly one fallback attempt and return its response |
 | The primary returns a validation or credential error | A completion is requested | Surface the error without attempting fallback |
 | Both providers return 429 | A completion is requested | Return a clear HTTP 429 error without further attempts |
 | Both providers are unavailable | A completion is requested | Return a bounded failure distinguishable from quota exhaustion |

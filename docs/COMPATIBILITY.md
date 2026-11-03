@@ -147,11 +147,11 @@ The downstream commitment point is defined as the moment the gateway flushes HTT
 
 ### Mixed-failure mapping and observable outcomes
 
-When Attempt 1 (Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect or header timeout, or network fetch failure) before downstream response commitment, Attempt 2 (Gemini fallback) executes within the remaining time of the 60s total deadline.
+When Attempt 1 (the configured primary provider, default: Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect or header timeout, or network fetch failure) before downstream response commitment, Attempt 2 (the configured fallback provider, default: Gemini) executes within the remaining time of the 60s total deadline.
 
 The returned HTTP status code and OpenAI-compatible error object match the final failing attempt:
 
-| Primary Attempt (Groq) | Fallback Attempt (Gemini) | Gateway Status | Error Code | Observable Outcome / Behavior |
+| Primary Attempt (Default: Groq) | Fallback Attempt (Default: Gemini) | Gateway Status | Error Code | Observable Outcome / Behavior |
 | :--- | :--- | :--- | :--- | :--- |
 | 429 Too Many Requests | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 503 Service Unavailable | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
@@ -164,7 +164,7 @@ The returned HTTP status code and OpenAI-compatible error object match the final
 | Eligible failure (429/503/timeout/network) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
 | Connect / Header Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | Connect / Header Timeout (5s) | Connect / Header Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
-| Network Fetch Failure | Network Fetch Failure | 502 | `bad_gateway` | Both provider network fetches failed; return 502 error. |
+| Network Fetch Failure | Network Fetch Failure | 504 | `gateway_timeout` | Both provider network fetches failed; return 504 error. |
 | 400 Bad Request | (No fallback) | 502 | `bad_gateway` | Upstream validation failure; do not retry; return 502 error. |
 | 401 / 403 Unauthorized | (No fallback) | 502 | `bad_gateway` | Upstream credential failure; do not expose upstream keys; return 502 error. |
 | Headers committed (200 OK) | Connection reset / drop | 200 | (Aborted) | Response already in transit; zero fallback replay. |
