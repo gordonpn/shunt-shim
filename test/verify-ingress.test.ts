@@ -179,10 +179,12 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
                 ? input.toString()
                 : input.url;
 
+          const parsed = new URL(urlStr, targetUrl);
+
           // Handle upstream provider dispatches in live probe
           if (
-            urlStr.includes("api.groq.com") ||
-            urlStr.includes("generativelanguage.googleapis.com")
+            parsed.hostname === "api.groq.com" ||
+            parsed.hostname === "generativelanguage.googleapis.com"
           ) {
             return new Response(
               JSON.stringify({
