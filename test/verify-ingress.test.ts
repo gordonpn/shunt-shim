@@ -68,6 +68,12 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
       expect(parseArgs(["http://localhost:8787", "--timeout", "0"])).toBe(
         "invalid",
       );
+      expect(
+        parseArgs(["http://localhost:8787", "--timeout", "2147483648"]),
+      ).toBe("invalid");
+      expect(parseArgs(["http://localhost:8787", "--timeout=2147483648"])).toBe(
+        "invalid",
+      );
       expect(parseArgs(["http://localhost:8787", "--lve"])).toBe("invalid");
       expect(parseArgs(["http://localhost:8787", "extra"])).toBe("invalid");
     });

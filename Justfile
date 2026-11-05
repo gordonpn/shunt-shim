@@ -60,11 +60,11 @@ rollback deployment_id="":
 
 # Verify ingress endpoints and conformance
 verify-ingress url:
-    node --experimental-strip-types scripts/verify-ingress.ts {{ url }}
+    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }}
 
 # Verify ingress endpoints with live end-to-end chat completion
 verify-ingress-live url:
-    node --experimental-strip-types scripts/verify-ingress.ts {{ url }} --live
+    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }} --live
 
 # Inspect real-time edge runtime logs
 tail:
@@ -93,7 +93,7 @@ test-secrets:
 
 # Validate repository automation without application code or secrets
 check-workflows: lint-workflows test-secrets
-    grep -Eq '^[[:space:]]*"enable_request_signal"' wrangler.jsonc
+    sed -n '/"compatibility_flags"[[:space:]]*:[[:space:]]*\[/,/\]/p' wrangler.jsonc | grep -Eq '^[[:space:]]*"enable_request_signal"'
     shellcheck .github/scripts/*.sh
     git diff --check $(git hash-object -t tree /dev/null)
     git diff --cached --check

@@ -7,7 +7,7 @@ Prerequisites: only Groq and Google AI Studio API keys and one random gateway se
 ## 1. Prerequisites and Local Environment
 
 Ensure the following tools are installed:
-- `node` (v22+) and `pnpm` (v10+)
+- `node` (v22.6.0+) and `pnpm` (v10+)
 - `just` (command runner)
 - `wrangler` (Cloudflare Workers CLI, available via `pnpm exec wrangler`)
 
@@ -143,6 +143,11 @@ The `verify-ingress` script executes the following checks:
 
 ### Manual Smoke Testing via curl
 
+Export the configured gateway token in the active shell:
+```bash
+export GATEWAY_TOKENS="$(sed -n 's/^GATEWAY_TOKENS="\(.*\)"$/\1/p' .dev.vars)"
+```
+
 #### Verify Unauthenticated Health Endpoints
 ```bash
 curl -i -s "http://127.0.0.1:8787/health"
@@ -261,7 +266,7 @@ The service operates within defined platform and gateway constraints:
 | Inbound Body Size | 10 MB (10,485,760 bytes) | Inspected via `Content-Length` and stream byte count in `src/validation.ts`. Returns HTTP 413 `payload_too_large`. |
 | Workers CPU Limit | 10 ms CPU time per request (Free tier) | Non-blocking asynchronous I/O (network wait time is unmetered by Cloudflare Workers). |
 | Workers Request Quota | 100,000 requests per day (Free tier) | Cloudflare edge enforcement. Rate limits return HTTP 429 when exhausted. |
-| Upstream Connect Timeout | 5 seconds per attempt | Enforced via `AbortSignal.any` with `timeout(5000)` on upstream fetch. Triggers fallback on primary timeout. |
+| Upstream Attempt Timeout | 5 seconds per attempt | Covers connection setup and the wait for response headers. A timer aborts the upstream fetch through AbortSignal.any. Triggers fallback with connection_timeout. |
 | Total Gateway Deadline | 60 seconds total request bound | Gateway aborts active requests and returns HTTP 504 `gateway_timeout`. |
 | Client Disconnect | Request-signal propagation | `compatibility_flags = ["enable_request_signal"]` links client TCP disconnect to `Request.signal`; confirm deployed cancellation before relying on it operationally. |
 
@@ -277,4 +282,15 @@ The service operates within defined platform and gateway constraints:
 
 ### Client Disconnect
 - Symptom: Client aborts the request before completion.
-- Action: The unit suite verifies that the linked `AbortController` aborts active upstream work. Confirm the Workers request-signal path against deployed ingress before relying on that behavior operationally.
+- Operational Verification:
+  1. In one terminal, run `just tail` to stream real-time edge runtime logs.
+  2. In a second terminal, execute a request with curl and cancel it before completion:
+     ```bash
+     curl -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
+       -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
+       -H "Content-Type: application/json" \
+       -d '{"model":"fast","messages":[{"role":"user","content":"write a long story"}]}' \
+       --max-time 0.2
+     ```
+  3. Inspect `just tail` output to verify that edge execution cancelled when the client disconnected.
+- Invariants: The unit suite (`test/index.test.ts`) verifies that the linked `AbortController` aborts active upstream work when the request signal fires. Cloudflare Workers propagation requires `enable_request_signal` in `wrangler.jsonc`.

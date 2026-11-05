@@ -644,7 +644,7 @@ export function parseArgs(
 
     if (arg === "--timeout") {
       const parsed = Number(argv[i + 1]);
-      if (!Number.isInteger(parsed) || parsed <= 0) {
+      if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 2147483647) {
         return "invalid";
       }
       timeoutMs = parsed;
@@ -654,7 +654,7 @@ export function parseArgs(
 
     if (arg.startsWith("--timeout=")) {
       const parsed = Number(arg.slice("--timeout=".length));
-      if (!Number.isInteger(parsed) || parsed <= 0) {
+      if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 2147483647) {
         return "invalid";
       }
       timeoutMs = parsed;
