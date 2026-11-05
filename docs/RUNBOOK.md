@@ -293,5 +293,5 @@ The service operates within defined platform and gateway constraints:
        -d '{"model":"fast","messages":[{"role":"user","content":"write a long story"}]}' \
        --max-time 0.2
      ```
-  3. Inspect `just tail` output for the matching `requestId` (`disconnect-probe-01`). The emitted diagnostic record confirms the request ended within the abort window (~200ms) rather than waiting for full completion (>1000ms), demonstrating that edge execution stopped when the client disconnected.
+  3. Inspect `just tail` output for the matching `requestId` (`disconnect-probe-01`). The diagnostic record only correlates the probe with a completion entry. Its `latencyMs` and `status` do not show that upstream work was cancelled, because `DiagnosticRecord` has no abort field. Do not treat this step as proof of cancellation. Confirm cancellation with a deterministic deployed check before relying on it.
 - Invariants: The unit suites (`test/index.test.ts` and `test/cancellation.test.ts`) verify that the linked `AbortController` aborts active upstream work when the request signal fires. Cloudflare Workers propagation requires `enable_request_signal` in `wrangler.jsonc`.
