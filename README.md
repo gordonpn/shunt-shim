@@ -43,7 +43,7 @@ For an inventory of always-free compute, storage, edge networks, and LLMs, consu
 The Worker entrypoint and Wrangler configuration are runnable locally and verified through test suites.
 
 ### 1. Prerequisites
-- `node` (v22.6.0+) and `pnpm` (v10+)
+- `node` (v22.12.0+) and `pnpm` (v10+)
 - `just` task runner
 - Cloudflare account with Workers enabled
 - Free API keys from [Google AI Studio](https://aistudio.google.com) and [Groq](https://console.groq.com)

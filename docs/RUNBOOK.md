@@ -7,7 +7,7 @@ Prerequisites: only Groq and Google AI Studio API keys and one random gateway se
 ## 1. Prerequisites and Local Environment
 
 Ensure the following tools are installed:
-- `node` (v22.6.0+) and `pnpm` (v10+)
+- `node` (v22.12.0+) and `pnpm` (v10+)
 - `just` (command runner)
 - `wrangler` (Cloudflare Workers CLI, available via `pnpm exec wrangler`)
 
@@ -145,7 +145,7 @@ The `verify-ingress` script executes the following checks:
 
 Export the configured gateway token in the active shell:
 ```bash
-export GATEWAY_TOKENS="$(sed -n 's/^GATEWAY_TOKENS="\(.*\)"$/\1/p' .dev.vars)"
+export GATEWAY_TOKENS="$(sed -n 's/^GATEWAY_TOKENS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' .dev.vars)"
 ```
 
 #### Verify Unauthenticated Health Endpoints
@@ -283,14 +283,15 @@ The service operates within defined platform and gateway constraints:
 ### Client Disconnect
 - Symptom: Client aborts the request before completion.
 - Operational Verification:
-  1. In one terminal, run `just tail` to stream real-time edge runtime logs.
-  2. In a second terminal, execute a request with curl and cancel it before completion:
+  1. In one terminal, run `just tail` to stream real-time logs from the deployed Worker (or inspect stdout when testing locally via `just dev`).
+  2. In a second terminal, execute a request against the deployed endpoint with an explicit `x-request-id` header for correlation and abort it before completion:
      ```bash
-     curl -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
+     curl -s -X POST "https://<worker>.<subdomain>.workers.dev/v1/chat/completions" \
        -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
        -H "Content-Type: application/json" \
+       -H "x-request-id: disconnect-probe-01" \
        -d '{"model":"fast","messages":[{"role":"user","content":"write a long story"}]}' \
        --max-time 0.2
      ```
-  3. Inspect `just tail` output to verify that edge execution cancelled when the client disconnected.
-- Invariants: The unit suite (`test/index.test.ts`) verifies that the linked `AbortController` aborts active upstream work when the request signal fires. Cloudflare Workers propagation requires `enable_request_signal` in `wrangler.jsonc`.
+  3. Inspect `just tail` output for the matching `requestId` (`disconnect-probe-01`). The emitted diagnostic record confirms the request ended within the abort window (~200ms) rather than waiting for full completion (>1000ms), demonstrating that edge execution stopped when the client disconnected.
+- Invariants: The unit suites (`test/index.test.ts` and `test/cancellation.test.ts`) verify that the linked `AbortController` aborts active upstream work when the request signal fires. Cloudflare Workers propagation requires `enable_request_signal` in `wrangler.jsonc`.
