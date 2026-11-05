@@ -36,9 +36,35 @@ check-format:
 lint:
     pnpm run lint
 
+# Generate a cryptographically secure random token for GATEWAY_TOKENS
+generate-token:
+    @node --experimental-strip-types scripts/generate-token.ts
+
+# Provision runtime secrets from environment to Cloudflare Workers
+provision-secrets: check-secrets
+    @printf "%s" "$GEMINI_API_KEY" | pnpm exec wrangler secret put GEMINI_API_KEY
+    @printf "%s" "$GROQ_API_KEY" | pnpm exec wrangler secret put GROQ_API_KEY
+    @printf "%s" "$GATEWAY_TOKENS" | pnpm exec wrangler secret put GATEWAY_TOKENS
+
 # Deploy edge worker to Cloudflare
 deploy:
     pnpm exec wrangler deploy
+
+# Inspect deployment history
+deployments:
+    pnpm exec wrangler deployments list
+
+# Rollback worker deployment to previous or specified version
+rollback deployment_id="":
+    pnpm exec wrangler rollback {{ if deployment_id != "" { deployment_id } else { "" } }} -y
+
+# Verify ingress endpoints and conformance
+verify-ingress url:
+    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }}
+
+# Verify ingress endpoints with live end-to-end chat completion
+verify-ingress-live url:
+    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }} --live
 
 # Inspect real-time edge runtime logs
 tail:
@@ -67,6 +93,7 @@ test-secrets:
 
 # Validate repository automation without application code or secrets
 check-workflows: lint-workflows test-secrets
+    sed -n '/"compatibility_flags"[[:space:]]*:[[:space:]]*\[/,/\]/p' wrangler.jsonc | grep -Eq '^[[:space:]]*"enable_request_signal"'
     shellcheck .github/scripts/*.sh
     git diff --check $(git hash-object -t tree /dev/null)
     git diff --cached --check
@@ -97,4 +124,4 @@ review-workflows:
 # Resolve deterministic OCR coverage and review rules for source code
 review-code:
     ocr delegate preview --format json
-    ocr delegate rule --format json package.json tsconfig.json biome.json wrangler.jsonc vitest.config.ts src/*.ts test/*.ts
+    ocr delegate rule --format json package.json tsconfig.json biome.json wrangler.jsonc vitest.config.ts src/*.ts test/*.ts scripts/*.ts

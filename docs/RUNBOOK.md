@@ -1,13 +1,13 @@
 # Operational Runbook
 
-This runbook documents setup, deployment, verification, monitoring, and incident response procedures for `shunt-shim`. The Worker service architecture is defined by [ARCHITECTURE.md](ARCHITECTURE.md), based on foundational decisions in [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
+This runbook documents setup, deployment, verification, monitoring, rollback, and incident response procedures for `shunt-shim`. The Worker service architecture is defined by [ARCHITECTURE.md](ARCHITECTURE.md), based on foundational decisions in [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
 Prerequisites: only Groq and Google AI Studio API keys and one random gateway secret are required. The MVP defers shared accounting and requires no KV namespace or database.
 
 ## 1. Prerequisites and Local Environment
 
 Ensure the following tools are installed:
-- `node` (v22+) and `pnpm` (v10+)
+- `node` (v22.12.0+) and `pnpm` (v10+)
 - `just` (command runner)
 - `wrangler` (Cloudflare Workers CLI, available via `pnpm exec wrangler`)
 
@@ -15,8 +15,15 @@ Ensure active developer accounts and API keys from upstream providers:
 - Google AI Studio API Key ([aistudio.google.com](https://aistudio.google.com))
 - Groq Cloud API Key ([console.groq.com](https://console.groq.com))
 
-## 2. Local Development Setup
+## 2. Local Development Setup and Secret Generation
 
+### Step 1: Generate Gateway Secret
+Generate a cryptographically secure 32-byte hex secret (64 lowercase hex characters):
+```bash
+just generate-token
+```
+
+### Step 2: Configure Local Environment
 1. Copy the environment template:
    ```bash
    cp .env.example .dev.vars
@@ -26,7 +33,7 @@ Ensure active developer accounts and API keys from upstream providers:
    ```ini
    GEMINI_API_KEY="AIzaSy..."
    GROQ_API_KEY="gsk_..."
-   GATEWAY_TOKENS="<one-random-gateway-secret>"
+   GATEWAY_TOKENS="<generated-token-from-step-1>"
    ```
 
 3. Validate required environment secrets:
@@ -46,6 +53,23 @@ Ensure active developer accounts and API keys from upstream providers:
    ```
    The local edge server listens by default at `http://127.0.0.1:8787`.
 
+### Coordinated Secret Rotation
+Because the MVP enforces single-token authentication via exact string comparison in `authMiddleware`, rotating the gateway secret causes active clients presenting the old token to receive HTTP 401 until their configuration is updated. Overlapping multi-token support is deferred to post-MVP.
+
+To execute a coordinated token rotation:
+1. Generate a new secret: `just generate-token`.
+2. Prepare updated client configurations in downstream runners (for example, repository secrets for DeepSeek Reviewer, OpenCodeReview, or PR-Agent).
+3. Update the Cloudflare Workers secret:
+   ```bash
+   pnpm exec wrangler secret put GATEWAY_TOKENS
+   ```
+   Enter the new token at Wrangler's prompt, or update `.dev.vars` and run `just provision-secrets`.
+4. Immediately apply the new bearer token to downstream client configurations.
+5. Verify ingress connectivity and authentication with the new credential:
+   ```bash
+   just verify-ingress https://shunt-shim.<subdomain>.workers.dev
+   ```
+
 ## 3. Production Deployment to Cloudflare Workers
 
 ### Step 1: Authenticate with Cloudflare
@@ -54,33 +78,86 @@ pnpm exec wrangler login
 ```
 
 ### Step 2: Provision Edge Secrets
-Store credentials securely in Cloudflare:
+Automated provisioning from `.dev.vars` / environment:
 ```bash
-pnpm exec wrangler secret put GEMINI_API_KEY
-pnpm exec wrangler secret put GROQ_API_KEY
-pnpm exec wrangler secret put GATEWAY_TOKENS
+just provision-secrets
 ```
+This pipes each credential from the local environment into `wrangler secret put` non-interactively without leaking values in shell history or process arguments.
 
 ### Step 3: Deploy Worker
+Deploy the bundle to Cloudflare Workers:
 ```bash
 just deploy
 ```
 The deployed worker URL will be displayed in the terminal output (for example, `https://shunt-shim.<your-subdomain>.workers.dev`).
 
-## 4. Verification and Smoke Testing
-
-Export the configured gateway secret and target base URL for smoke tests:
+### Step 4: Inspect Deployments and Rollback
+List deployment history with versions, timestamps, and deployment IDs:
 ```bash
-GATEWAY_SECRET="<one-random-gateway-secret>"
-GATEWAY_BASE_URL="http://127.0.0.1:8787"
+just deployments
 ```
 
-Run the following test commands against your local server or production URL.
-
-### Verify Virtual Models Catalog
+To roll back immediately to the previous deployment if an issue arises:
 ```bash
-curl -s -X GET "${GATEWAY_BASE_URL}/v1/models" \
-  -H "Authorization: Bearer ${GATEWAY_SECRET}" | jq .
+just rollback
+```
+
+To roll back to a specific deployment version ID:
+```bash
+just rollback <deployment-id>
+```
+
+## 4. Verification and Smoke Testing
+
+### Automated Ingress Verification Suite
+Run the automated verification suite against local or deployed ingress:
+```bash
+# Verify local emulator
+just verify-ingress http://127.0.0.1:8787
+
+# Verify deployed worker
+just verify-ingress https://shunt-shim.<subdomain>.workers.dev
+```
+
+The recipes load `GATEWAY_TOKENS` from `.dev.vars`; do not pass it as a command-line argument.
+
+To execute a live end-to-end chat completion against the primary upstream model through the ingress route:
+```bash
+just verify-ingress-live https://shunt-shim.<subdomain>.workers.dev
+```
+
+### Automated Ingress Probes Executed
+The `verify-ingress` script executes the following checks:
+1. `GET /`: Unauthenticated root probe returns HTTP 200 `{ status: "ok", service: "shunt-shim" }` and verifies `x-request-id` response header presence.
+2. `GET /health`: Unauthenticated health probe returns HTTP 200 `{ status: "ok", service: "shunt-shim" }`.
+3. `GET /v1/models` (unauthenticated): Returns HTTP 401 with error code `invalid_api_key`.
+4. `GET /v1/models` (invalid credentials): Returns HTTP 401 with error code `invalid_api_key`.
+5. `POST /v1/chat/completions` (unauthenticated): Returns HTTP 401 with error code `invalid_api_key`.
+6. `GET /v1/models` (authenticated): Returns HTTP 200 list containing virtual model `fast`.
+7. `POST /v1/models` (method constraint): Returns HTTP 405 with `Allow: GET, OPTIONS` and error code `method_not_allowed`.
+8. `POST /v1/chat/completions` (stream rejected): Requests with `"stream": true` return HTTP 400 with code `unsupported_parameter` and param `stream`.
+9. `POST /v1/chat/completions` (stream_options rejected): Requests with `"stream_options"` return HTTP 400 with code `unsupported_parameter` and param `stream_options`.
+10. `POST /v1/chat/completions` (unknown model routing): Requests for unmapped models return HTTP 404 with code `model_not_found`.
+11. `POST /v1/chat/completions` (payload size limit): Payloads exceeding 10 MB return HTTP 413 with code `payload_too_large`.
+12. `POST /v1/chat/completions` (live completion, optional via `--live`): Confirms end-to-end upstream model generation returning valid OpenAI-compatible JSON.
+
+### Manual Smoke Testing via curl
+
+Export the configured gateway token in the active shell:
+```bash
+export GATEWAY_TOKENS="$(sed -n 's/^GATEWAY_TOKENS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' .dev.vars)"
+```
+
+#### Verify Unauthenticated Health Endpoints
+```bash
+curl -i -s "http://127.0.0.1:8787/health"
+```
+Expected response: HTTP 200 with `{"status":"ok","service":"shunt-shim"}`.
+
+#### Verify Virtual Models Catalog
+```bash
+curl -s -X GET "http://127.0.0.1:8787/v1/models" \
+  -H "Authorization: Bearer ${GATEWAY_TOKENS}" | jq .
 ```
 Expected response:
 ```json
@@ -92,10 +169,10 @@ Expected response:
 }
 ```
 
-### Test Non-Streaming Chat Completion (`fast` alias)
+#### Test Non-Streaming Chat Completion (`fast` alias)
 ```bash
-curl -s -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
-  -H "Authorization: Bearer ${GATEWAY_SECRET}" \
+curl -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
+  -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "fast",
@@ -106,11 +183,11 @@ curl -s -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
 ```
 Expected response: HTTP 200 with OpenAI-compatible JSON completion.
 
-### Verify Streaming Request Rejection (`stream: true`)
+#### Verify Streaming Request Rejection (`stream: true`)
 Streaming is deferred to post-MVP. Verify that requests with `stream: true` are rejected with HTTP 400 Bad Request:
 ```bash
-curl -i -s -X POST "${GATEWAY_BASE_URL}/v1/chat/completions" \
-  -H "Authorization: Bearer ${GATEWAY_SECRET}" \
+curl -i -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
+  -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "fast",
@@ -132,9 +209,9 @@ Expected response: HTTP 400 Bad Request with:
 }
 ```
 
-### Verify Authentication Enforcement
+#### Verify Authentication Enforcement
 ```bash
-curl -i -X GET "${GATEWAY_BASE_URL}/v1/models" \
+curl -i -X GET "http://127.0.0.1:8787/v1/models" \
   -H "Authorization: Bearer invalid-token"
 ```
 Verify that the server rejects the request with HTTP `401 Unauthorized`.
@@ -180,7 +257,20 @@ Example fallback log entry:
 ### Quota Diagnostics
 The MVP has no shared quota counters or circuit-breaker state to inspect. Use upstream status codes, rate-limit headers when available, and provider dashboards as the source of truth.
 
-## 6. Incident Handling and Diagnostics
+## 6. Platform Limits and Resource Bounds
+
+The service operates within defined platform and gateway constraints:
+
+| Boundary | Limit / Specification | Enforcement Mechanism |
+|---|---|---|
+| Inbound Body Size | 10 MB (10,485,760 bytes) | Inspected via `Content-Length` and stream byte count in `src/validation.ts`. Returns HTTP 413 `payload_too_large`. |
+| Workers CPU Limit | 10 ms CPU time per request (Free tier) | Non-blocking asynchronous I/O (network wait time is unmetered by Cloudflare Workers). |
+| Workers Request Quota | 100,000 requests per day (Free tier) | Cloudflare edge enforcement. Rate limits return HTTP 429 when exhausted. |
+| Upstream Attempt Timeout | 5 seconds per attempt | Covers connection setup and the wait for response headers. A timer aborts the upstream fetch through AbortSignal.any. Triggers fallback with connection_timeout. |
+| Total Gateway Deadline | 60 seconds total request bound | Gateway aborts active requests and returns HTTP 504 `gateway_timeout`. |
+| Client Disconnect | Request-signal propagation | `compatibility_flags = ["enable_request_signal"]` links client TCP disconnect to `Request.signal`; confirm deployed cancellation before relying on it operationally. |
+
+## 7. Incident Handling and Diagnostics
 
 ### Upstream HTTP 429 (Rate Limit Tripped)
 - Symptom: Real-time logs indicate upstream 429 from Groq.
@@ -192,4 +282,16 @@ The MVP has no shared quota counters or circuit-breaker state to inspect. Use up
 
 ### Client Disconnect
 - Symptom: Client aborts the request before completion.
-- Action: In-flight upstream fetches abort via linked `AbortController`. Zero attempts are recorded if aborted prior to dispatch.
+- Operational Verification:
+  1. In one terminal, run `just tail` to stream real-time logs from the deployed Worker (or inspect stdout when testing locally via `just dev`).
+  2. In a second terminal, execute a request against the deployed endpoint with an explicit `x-request-id` header for correlation and abort it before completion:
+     ```bash
+     curl -s -X POST "https://<worker>.<subdomain>.workers.dev/v1/chat/completions" \
+       -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
+       -H "Content-Type: application/json" \
+       -H "x-request-id: disconnect-probe-01" \
+       -d '{"model":"fast","messages":[{"role":"user","content":"write a long story"}]}' \
+       --max-time 0.2
+     ```
+  3. Inspect `just tail` output for the matching `requestId` (`disconnect-probe-01`). The diagnostic record only correlates the probe with a completion entry. Its `latencyMs` and `status` do not show that upstream work was cancelled, because `DiagnosticRecord` has no abort field. Do not treat this step as proof of cancellation. Confirm cancellation with a deterministic deployed check before relying on it.
+- Invariants: The unit suites (`test/index.test.ts` and `test/cancellation.test.ts`) verify that the linked `AbortController` aborts active upstream work when the request signal fires. Cloudflare Workers propagation requires `enable_request_signal` in `wrangler.jsonc`.
