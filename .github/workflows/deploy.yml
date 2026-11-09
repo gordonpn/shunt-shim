@@ -1,0 +1,105 @@
+name: deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  project:
+    name: runner / deployment prerequisites
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.files.outputs.ready }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Detect project files
+        id: files
+        run: echo "ready=${{ hashFiles('package.json') != '' && hashFiles('pnpm-lock.yaml') != '' && hashFiles('wrangler.jsonc') != '' }}" >> "$GITHUB_OUTPUT"
+
+  preview:
+    name: runner / deploy preview
+    needs: project
+    if: github.event_name == 'pull_request' && needs.project.outputs.ready == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GATEWAY_TOKENS: ${{ secrets.GATEWAY_TOKENS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Setup verification tools
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.3
+      - name: Install dependencies
+        run: just install-ci
+      - name: Deploy preview and verify ingress
+        run: just deploy-preview-ci "${{ github.event.pull_request.number }}"
+
+  production:
+    name: runner / deploy production
+    needs: project
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.project.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GATEWAY_TOKENS: ${{ secrets.GATEWAY_TOKENS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Setup verification tools
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.10.3
+      - name: Install dependencies
+        run: just install-ci
+      - name: Check formatting
+        run: just check-format
+      - name: Lint
+        run: just lint
+      - name: Typecheck
+        run: just typecheck
+      - name: Run unit tests
+        run: just test
+      - name: Build
+        run: just build
+      - name: Deploy production and verify ingress
+        run: just deploy-production-ci

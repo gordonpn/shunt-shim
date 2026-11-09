@@ -50,6 +50,18 @@ provision-secrets: check-secrets
 deploy:
     pnpm exec wrangler deploy
 
+# Deploy worker preview version with optional alias
+deploy-preview alias="":
+    pnpm exec wrangler versions upload {{ if alias != "" { "--preview-alias " + quote(alias) } else { "" } }}
+
+# Deploy preview version and verify ingress
+deploy-preview-ci pr="":
+    bash .github/scripts/deploy-preview.sh {{ quote(pr) }}
+
+# Deploy to production with automatic rollback on ingress failure
+deploy-production-ci:
+    bash .github/scripts/deploy-production.sh
+
 # Inspect deployment history
 deployments:
     pnpm exec wrangler deployments list
@@ -91,8 +103,12 @@ check-secrets:
 test-secrets:
     bash .github/scripts/test-check-secrets.sh
 
+# Verify deploy scripts behavior against edge cases
+test-deploy-scripts:
+    bash .github/scripts/test-deploy-scripts.sh
+
 # Validate repository automation without application code or secrets
-check-workflows: lint-workflows test-secrets
+check-workflows: lint-workflows test-secrets test-deploy-scripts
     sed -n '/"compatibility_flags"[[:space:]]*:[[:space:]]*\[/,/\]/p' wrangler.jsonc | grep -Eq '^[[:space:]]*"enable_request_signal"'
     shellcheck .github/scripts/*.sh
     git diff --check $(git hash-object -t tree /dev/null)

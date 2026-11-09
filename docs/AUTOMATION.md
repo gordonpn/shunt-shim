@@ -73,3 +73,24 @@ PR-Agent reads repository configuration in `.pr_agent.toml` to enforce skeptical
 architecture review, challenging unneeded complexity or abstractions against
 documented repository architecture and structuring findings into its review
 schema.
+
+## Continuous deployment and preview environments
+
+Continuous deployment runs via `.github/workflows/deploy.yml`. It requires `package.json`, `pnpm-lock.yaml`, and `wrangler.jsonc` before initiating deployment jobs.
+
+### Required repository secrets
+
+Configure the following secrets in repository settings:
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with `Workers Scripts: Edit` and `Account Settings: Read` permissions.
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account identifier.
+- `GATEWAY_TOKENS` (optional): Gateway bearer token for running all 11 authenticated ingress conformance probes after deployment. When omitted, the verifier runs the 5 unauthenticated health and error contract probes.
+
+When credentials are not configured or on external fork pull requests, deployment jobs skip safely without failing CI checks or exposing secrets.
+
+### Pull request preview deployments
+
+For pull requests originating from the same repository, the workflow uploads an isolated Worker Version with `preview_urls: true` and alias `pr-<number>` (`just deploy-preview-ci <number>`). This exposes a deterministic preview URL (such as `https://pr-<id>-shunt-shim.<subdomain>.workers.dev`) without altering active production traffic. Post-deployment ingress verification runs against the preview URL. Concurrency group `deploy-preview-<number>` with `cancel-in-progress: true` automatically cancels superseded in-flight uploads.
+
+### Production deployments and automated rollback
+
+Pushes to the `main` branch trigger production deployment (`just deploy-production-ci`). The workflow runs local quality gates (formatting, linting, typechecking, tests, build) before deploying via `just deploy`. It then runs `just verify-ingress` against the deployed production endpoint. If post-deployment ingress verification fails, `just rollback` restores the prior working Worker version immediately and the job exits non-zero. Concurrency group `deploy-production` with `cancel-in-progress: false` serializes production releases.
