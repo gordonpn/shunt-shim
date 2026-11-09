@@ -282,21 +282,33 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
     });
   });
 
-  describe("Model Alias Validation (HTTP 404 model_not_found)", () => {
-    it("rejects missing, non-string, or empty model alias", async () => {
-      const invalidModels = [undefined, null, 123, true, {}, [], "", "   "];
-      for (const model of invalidModels) {
-        const req = { ...createValidChatRequest(), model };
-        const res = await postChat(req);
-        expect(res.status).toBe(404);
-        const json = (await res.json()) as ApiError;
-        expect(json.error.code).toBe("model_not_found");
-        expect(json.error.param).toBe("model");
-      }
-    });
+  describe("Model Alias Validation", () => {
+    it.each(
+      [undefined, null, 123, true, {}, [], "", "   "].map((model) => ({
+        model,
+      })),
+    )(
+      "rejects missing or invalid model %j with HTTP 400 before dispatch",
+      async ({ model }) => {
+        for (const path of ["/v1/chat/completions", "/chat/completions"]) {
+          const req = { ...createValidChatRequest(), model };
+          const res = await postChat(req, path);
+          expect(res.status).toBe(400);
+          const json = (await res.json()) as ApiError;
+          expect(json.error).toEqual({
+            message: "Missing required parameter: model",
+            type: "invalid_request_error",
+            code: "missing_required_parameter",
+            param: "model",
+          });
+        }
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      },
+    );
 
     it("rejects direct provider model names and deferred aliases", async () => {
       const disallowedModels = [
+        "unknown-model",
         "qwen/qwen3.8-27b",
         "gemini-2.5-flash-lite",
         "openai/gpt-oss-120b",
@@ -311,7 +323,11 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
         const json = (await res.json()) as ApiError;
         expect(json.error.code).toBe("model_not_found");
         expect(json.error.param).toBe("model");
+        expect(json.error.message).toBe(
+          `The model '${model}' does not exist or is not available.`,
+        );
       }
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it("accepts strictly the pinned model alias 'fast'", async () => {

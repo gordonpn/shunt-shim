@@ -450,7 +450,7 @@ describe("Gateway HTTP Entrypoint", () => {
       expect(bodyArray.error.code).toBe("invalid_json");
     });
 
-    it("returns 404 when requested model is unknown or missing", async () => {
+    it("returns 404 for unknown models and 400 for a missing model", async () => {
       const unknownModels = [
         "unknown-model",
         "deep",
@@ -498,7 +498,11 @@ describe("Gateway HTTP Entrypoint", () => {
         },
         mockEnv,
       );
-      expect(resMissing.status).toBe(404);
+      expect(resMissing.status).toBe(400);
+      const bodyMissing = (await resMissing.json()) as ApiError;
+      expect(bodyMissing.error.code).toBe("missing_required_parameter");
+      expect(bodyMissing.error.param).toBe("model");
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it("returns distinct unique completion IDs across multiple requests", async () => {
