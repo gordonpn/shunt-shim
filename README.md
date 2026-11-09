@@ -43,33 +43,51 @@ For an inventory of always-free compute, storage, edge networks, and LLMs, consu
 The Worker entrypoint and Wrangler configuration are runnable locally and verified through test suites.
 
 ### 1. Prerequisites
-- `node` (v22.12.0+) and `pnpm` (v10+)
+- Node.js 22 (v22.12.0+) and `pnpm` 10.28.1 (pinned in `package.json`)
 - `just` task runner
-- Cloudflare account with Workers enabled
-- Free API keys from [Google AI Studio](https://aistudio.google.com) and [Groq](https://console.groq.com)
+- For deployment: a Cloudflare account with Workers enabled
+- For live completions: free API keys from [Google AI Studio](https://aistudio.google.com) and [Groq](https://console.groq.com)
 
 ### 2. Local Setup
-Install dependencies and configure local environment variables:
+From a clean checkout, install the pinned dependencies and run every application
+quality gate. No provider credentials or `.dev.vars` file are needed; tests mock
+upstream requests, and the build only creates a local bundle:
+
 ```bash
-pnpm install
-cp .env.example .dev.vars
+just install-ci
+just check-format
+just lint
+just typecheck
+just build
+just test
 ```
 
-Edit `.dev.vars` with your provider keys and a random gateway secret:
+`just format` applies formatting when editing. CI repeats the checks above on a
+fresh checkout. To verify repository automation too, install the tools in
+`mise.toml` with `mise install`, then run `mise exec -- just check-workflows`.
+
+Start the local Worker without provider credentials:
+
+```bash
+just dev
+```
+
+Once Wrangler reports ready, `curl --fail http://127.0.0.1:8787/health` returns
+`{"status":"ok","service":"shunt-shim"}`. Stop the server with Ctrl-C.
+Authenticated API routes require the three environment bindings below; the
+health probe does not contact a provider.
+
+For live completions, copy `.env.example` to `.dev.vars` and replace its
+placeholders with real provider keys and a random gateway secret:
+
 ```ini
 GEMINI_API_KEY="AIzaSy..."
 GROQ_API_KEY="gsk_..."
 GATEWAY_TOKENS="<one-random-gateway-secret>"
 ```
 
-Validate secrets, check types, run tests, and start the local development server:
-```bash
-just check-secrets
-just typecheck
-just test
-just dev
-```
-The gateway will listen locally on `http://127.0.0.1:8787`.
+Run `just check-secrets`, then `just dev`. The gateway listens locally at
+`http://127.0.0.1:8787`. Keep `.dev.vars` untracked.
 
 ### 3. Deploy to Cloudflare Workers
 Provision edge secrets and deploy:
