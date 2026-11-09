@@ -8,7 +8,12 @@ This transfer does not select a gateway runtime or implement the gateway.
 CI runs on main-branch pushes and pull requests. Workflow checks run immediately;
 the pnpm test job executes because `package.json` and `pnpm-lock.yaml` are present.
 The project provides `format:check`, `lint`, `typecheck`, `test`, `test:coverage`,
-and `build` package scripts. Node 22 is configured via `actions/setup-node`, and
+and `build` package scripts. CI also runs `just test-dev` on Linux with `curl`
+and `setsid`: it starts the configured local Worker without provider credentials,
+runs the five unauthenticated ingress probes, and cleans up the runtime process
+group. Startup is bounded to 60 readiness attempts, each with a one-second HTTP
+timeout and a half-second delay. Probe timeouts use the verifier's 15-second
+default. Node 22 is configured via `actions/setup-node`, and
 `pnpm/action-setup` automatically derives `pnpm@10.28.1` from `packageManager`.
 
 Reviewdog runs on pull requests. Actionlint review comments run for same-repository

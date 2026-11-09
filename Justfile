@@ -127,6 +127,10 @@ typecheck:
 test:
     pnpm test
 
+# Smoke-test the configured Worker locally (Linux: requires curl and setsid)
+test-dev:
+    bash .github/scripts/test-dev.sh
+
 test-coverage:
     pnpm run test:coverage
 

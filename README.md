@@ -49,6 +49,19 @@ The Worker entrypoint and Wrangler configuration are runnable locally and verifi
 - Free API keys from [Google AI Studio](https://aistudio.google.com) and [Groq](https://console.groq.com)
 
 ### 2. Local Setup
+For development checks without provider credentials, run:
+```bash
+pnpm install --frozen-lockfile
+mise install
+mise exec -- just check-format lint typecheck test build check-workflows test-dev
+```
+The Linux `test-dev` check requires `curl` and `setsid`. It starts the configured
+Worker locally, runs the five unauthenticated ingress probes, and stops the
+runtime. No Cloudflare account or provider keys are needed for these checks or
+for `just dev` health endpoints. Live completions and deployment require the
+credentials below. `src/worker.ts` exposes only the default Worker handler;
+`src/index.ts` retains library exports for tests and tooling.
+
 Install dependencies and configure local environment variables:
 ```bash
 pnpm install

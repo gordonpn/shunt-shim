@@ -75,3 +75,5 @@ jobs:
         run: just test
       - name: Build
         run: just build
+      - name: Smoke-test local Worker without provider credentials
+        run: just test-dev
