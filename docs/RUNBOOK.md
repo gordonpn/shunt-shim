@@ -107,6 +107,26 @@ To roll back to a specific deployment version ID:
 just rollback <deployment-id>
 ```
 
+### Step 5: Preview Deployments and Automated Delivery
+
+#### Pull Request Previews
+To deploy an isolated Worker version with a preview alias locally:
+```bash
+just deploy-preview pr-80
+```
+This uploads a Worker Version with `preview_urls: true` and generates a deterministic endpoint (for example, `https://pr-80-shunt-shim.<subdomain>.workers.dev`) without shifting production traffic.
+
+Preview URL lifecycle:
+- Each push reassigns the `pr-<number>` alias URL to the newest version.
+- Closed or merged pull requests leave the preview endpoint pinned to the last uploaded version until pruned per Cloudflare version retention limits.
+- Preview deployments never impact production routes or traffic.
+
+#### Continuous Delivery Pipeline
+The GitHub Actions deployment workflow (`.github/workflows/deploy.yml`) automates both preview and production releases:
+- Pull requests from the same repository upload a version with `--preview-alias pr-<number>` and run `just verify-ingress`.
+- Merges to `main` run quality checks, execute `just deploy`, verify ingress, and automatically trigger `just rollback` if post-deploy verification fails.
+- Required repository secrets: `CLOUDFLARE_API_TOKEN` (permissions: `Workers Scripts: Edit`, `Account Settings: Read`) and `CLOUDFLARE_ACCOUNT_ID`. Set `GATEWAY_TOKENS` to enable authenticated conformance checks.
+
 ## 4. Verification and Smoke Testing
 
 ### Automated Ingress Verification Suite
