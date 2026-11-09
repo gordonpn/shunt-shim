@@ -50,6 +50,10 @@ provision-secrets: check-secrets
 deploy:
     pnpm exec wrangler deploy
 
+# Synchronize only deployment and gateway credentials to GitHub repository secrets
+sync-github-secrets:
+    @bash .github/scripts/sync-secrets.sh
+
 # Deploy worker preview version with optional alias
 deploy-preview alias="":
     pnpm exec wrangler versions upload {{ if alias != "" { "--preview-alias " + quote(alias) } else { "" } }}
@@ -108,7 +112,7 @@ test-deploy-scripts:
     bash .github/scripts/test-deploy-scripts.sh
 
 # Validate repository automation without application code or secrets
-check-workflows: lint-workflows test-secrets test-deploy-scripts
+check-workflows: lint-workflows test-secrets test-deploy-scripts test-sync-secrets
     sed -n '/"compatibility_flags"[[:space:]]*:[[:space:]]*\[/,/\]/p' wrangler.jsonc | grep -Eq '^[[:space:]]*"enable_request_signal"'
     shellcheck .github/scripts/*.sh
     git diff --check $(git hash-object -t tree /dev/null)
@@ -116,6 +120,9 @@ check-workflows: lint-workflows test-secrets test-deploy-scripts
 
 lint-workflows:
     actionlint
+
+test-sync-secrets:
+    bash .github/scripts/test-sync-secrets.sh
 
 # Imported pnpm gates run in CI only when the project files exist
 install-ci:
