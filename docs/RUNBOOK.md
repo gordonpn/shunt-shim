@@ -116,6 +116,11 @@ just deploy-preview pr-80
 ```
 This uploads a Worker Version with `preview_urls: true` and generates a deterministic endpoint (for example, `https://pr-80-shunt-shim.<subdomain>.workers.dev`) without shifting production traffic.
 
+Preview URL lifecycle:
+- Each push reassigns the `pr-<number>` alias URL to the newest version.
+- Closed or merged pull requests leave the preview endpoint pinned to the last uploaded version until pruned per Cloudflare version retention limits.
+- Preview deployments never impact production routes or traffic.
+
 #### Continuous Delivery Pipeline
 The GitHub Actions deployment workflow (`.github/workflows/deploy.yml`) automates both preview and production releases:
 - Pull requests from the same repository upload a version with `--preview-alias pr-<number>` and run `just verify-ingress`.
