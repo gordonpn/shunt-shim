@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as worker from "../src/worker.js";
 import type { ApiError } from "../src/errors.js";
 import {
   ALLOWED_FALLBACK_MODELS,
@@ -15,11 +14,6 @@ const mockEnv = {
 };
 
 describe("Gateway HTTP Entrypoint", () => {
-  it("exports only the Worker handler at the deployment boundary", () => {
-    expect(Object.keys(worker)).toEqual(["default"]);
-    expect(worker.default).toBe(app);
-  });
-
   beforeEach(() => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       return new Response(

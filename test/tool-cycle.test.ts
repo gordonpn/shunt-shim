@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app, forwardChatCompletion, type GatewayEnv } from "../src/index.js";
+import * as worker from "../src/worker.js";
 import {
   createMultiTestToolDeclarations,
   createTestToolDeclaration,
@@ -24,6 +25,11 @@ const mockEnv: GatewayEnv = {
 };
 
 describe("JSON Tool Cycle Specification (Subtask #22 / Story #20)", () => {
+  it("exports only the Worker handler at the deployment boundary", () => {
+    expect(Object.keys(worker)).toEqual(["default"]);
+    expect(worker.default).toBe(app);
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });
