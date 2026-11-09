@@ -18,10 +18,18 @@ fi
 
 if [ -n "$ALIAS" ]; then
   echo "Deploying preview version with alias: ${ALIAS}..."
-  OUTPUT=$(just deploy-preview "${ALIAS}")
+  if ! OUTPUT=$(just deploy-preview "${ALIAS}" 2>&1); then
+    echo "${OUTPUT}"
+    echo "Error: Preview deployment command failed." >&2
+    exit 1
+  fi
 else
   echo "Deploying preview version..."
-  OUTPUT=$(just deploy-preview)
+  if ! OUTPUT=$(just deploy-preview 2>&1); then
+    echo "${OUTPUT}"
+    echo "Error: Preview deployment command failed." >&2
+    exit 1
+  fi
 fi
 echo "${OUTPUT}"
 

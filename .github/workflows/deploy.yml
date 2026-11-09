@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       ready: ${{ steps.files.outputs.ready }}
+      configured: ${{ steps.credentials.outputs.configured }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -25,11 +26,26 @@ jobs:
       - name: Detect project files
         id: files
         run: echo "ready=${{ hashFiles('package.json') != '' && hashFiles('pnpm-lock.yaml') != '' && hashFiles('wrangler.jsonc') != '' }}" >> "$GITHUB_OUTPUT"
+      - name: Check deployment credentials
+        id: credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
 
   preview:
     name: runner / deploy preview
     needs: project
-    if: github.event_name == 'pull_request' && needs.project.outputs.ready == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+    if: |
+      github.event_name == 'pull_request' &&
+      needs.project.outputs.ready == 'true' &&
+      needs.project.outputs.configured == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -63,7 +79,11 @@ jobs:
   production:
     name: runner / deploy production
     needs: project
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.project.outputs.ready == 'true'
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.project.outputs.ready == 'true' &&
+      needs.project.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -101,5 +121,18 @@ jobs:
         run: just test
       - name: Build
         run: just build
+      - name: Check head commit currency
+        id: head_check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_HEAD=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ -n "$CURRENT_HEAD" ] && [ "${{ github.sha }}" != "$CURRENT_HEAD" ]; then
+            echo "Commit ${{ github.sha }} is not the current head of main ($CURRENT_HEAD). Skipping deployment."
+            echo "is_current=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_current=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Deploy production and verify ingress
+        if: steps.head_check.outputs.is_current == 'true'
         run: just deploy-production-ci

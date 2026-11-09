@@ -7,7 +7,11 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
 fi
 
 echo "Deploying to production..."
-OUTPUT=$(just deploy)
+if ! OUTPUT=$(just deploy 2>&1); then
+  echo "${OUTPUT}"
+  echo "Error: Production deployment command failed." >&2
+  exit 1
+fi
 echo "${OUTPUT}"
 
 DEPLOY_URL=$(echo "${OUTPUT}" | grep -E -o 'https://[^[:space:]]+workers\.dev' | head -n 1 || true)
@@ -22,6 +26,12 @@ echo "Running post-deploy ingress verification..."
 if ! just verify-ingress "${DEPLOY_URL}"; then
   echo "Post-deploy ingress verification failed on production; rolling back to previous deployment..." >&2
   just rollback
+  echo "Running post-rollback ingress verification..."
+  if ! just verify-ingress "${DEPLOY_URL}"; then
+    echo "Error: Post-rollback ingress verification also failed. Production remains unhealthy." >&2
+    exit 1
+  fi
+  echo "Rollback restored healthy ingress, but exiting non-zero due to failed deployment." >&2
   exit 1
 fi
 
