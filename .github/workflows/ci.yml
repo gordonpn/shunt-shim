@@ -79,3 +79,5 @@ jobs:
         run: just test
       - name: Build
         run: just build
+      - name: Verify local Worker startup without provider credentials
+        run: bash .github/scripts/verify-dev.sh

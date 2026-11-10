@@ -2,12 +2,12 @@
 
 This runbook documents setup, deployment, verification, monitoring, rollback, and incident response procedures for `shunt-shim`. The Worker service architecture is defined by [ARCHITECTURE.md](ARCHITECTURE.md), based on foundational decisions in [ADR 0001](adr/0001-runtime-target-and-shared-request-bounds.md).
 
-Prerequisites: only Groq and Google AI Studio API keys and one random gateway secret are required. The MVP defers shared accounting and requires no KV namespace or database.
+Live-completion prerequisites: Groq and Google AI Studio API keys and one random gateway secret are required. Local health probes and mocked quality gates need no provider credentials. The MVP defers shared accounting and requires no KV namespace or database.
 
 ## 1. Prerequisites and Local Environment
 
 Ensure the following tools are installed:
-- `node` (v22.12.0+) and `pnpm` (v10+)
+- Node.js 22 (v22.12.0+) and `pnpm` 10.28.1 (pinned in `package.json`)
 - `just` (command runner)
 - `wrangler` (Cloudflare Workers CLI, available via `pnpm exec wrangler`)
 
@@ -16,6 +16,29 @@ Ensure active developer accounts and API keys from upstream providers:
 - Groq Cloud API Key ([console.groq.com](https://console.groq.com))
 
 ## 2. Local Development Setup and Secret Generation
+
+### Clean-checkout verification (no provider credentials)
+
+Install dependencies before invoking the project scripts:
+
+```bash
+just install-ci
+just check-format
+just lint
+just typecheck
+just build
+just test
+just dev
+```
+
+After Wrangler reports ready, run `curl --fail http://127.0.0.1:8787/health`
+in another terminal and expect `{"status":"ok","service":"shunt-shim"}`.
+Stop the server with Ctrl-C. Tests mock upstream calls; the dry-run build does
+not deploy. For workflow checks, install `mise.toml` tools with `mise install`
+and run `mise exec -- just check-workflows`.
+
+The following steps configure live provider calls. Skip them for mocked tests
+and the local health probe.
 
 ### Step 1: Generate Gateway Secret
 Generate a cryptographically secure 32-byte hex secret (64 lowercase hex characters):

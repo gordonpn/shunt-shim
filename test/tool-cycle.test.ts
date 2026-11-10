@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app, forwardChatCompletion, type GatewayEnv } from "../src/index.js";
+import * as worker from "../src/worker.js";
 import {
   createMultiTestToolDeclarations,
   createTestToolDeclaration,
@@ -24,6 +25,11 @@ const mockEnv: GatewayEnv = {
 };
 
 describe("JSON Tool Cycle Specification (Subtask #22 / Story #20)", () => {
+  it("exports only the Worker handler at the deployment boundary", () => {
+    expect(Object.keys(worker)).toEqual(["default"]);
+    expect(worker.default).toBe(app);
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -566,19 +572,26 @@ describe("JSON Tool Cycle Specification (Subtask #22 / Story #20)", () => {
       expect(json.error.code).toBe("bad_gateway");
     });
 
-    it("maps upstream fetch network failure to HTTP 502 bad_gateway", async () => {
-      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
-        new Error("Network connection reset"),
-      );
+    it("maps exhausted upstream network failures to HTTP 504 gateway_timeout", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new Error("Network connection reset"));
 
       const res = await postChat({
         model: "fast",
         messages: [{ role: "user", content: "Hello" }],
       });
 
-      expect(res.status).toBe(502);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+        "https://api.groq.com/openai/v1/chat/completions",
+      );
+      expect(fetchSpy.mock.calls[1]?.[0]).toBe(
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      );
+      expect(res.status).toBe(504);
       const json = (await res.json()) as { error: { code: string } };
-      expect(json.error.code).toBe("bad_gateway");
+      expect(json.error.code).toBe("gateway_timeout");
     });
 
     it("maps upstream primitive JSON response to HTTP 502 bad_gateway", async () => {

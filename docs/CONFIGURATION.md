@@ -58,7 +58,7 @@ The implemented Worker deployment configuration:
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "shunt-shim",
-  "main": "src/index.ts",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-03-01",
   "compatibility_flags": [
     "enable_request_signal"
