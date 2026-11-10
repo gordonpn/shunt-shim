@@ -130,6 +130,9 @@ Validation checks run in the following strict sequential pipeline before upstrea
   to 413, quota exhaustion to 429, internal failure to 500, invalid upstream
   response or upstream credential rejection to 502, exhausted unavailability to
   503, and exhausted timeout/deadline to 504. Never embed failures in HTTP 200.
+- Cancel unconsumed upstream HTTP error bodies before fallback or returning an
+  error. Cleanup failures preserve the provider error; waiting for cleanup stays
+  within the total deadline and stops on client disconnect.
 - Preserve safe `Retry-After` and request/token rate-limit headers from the final
   failing attempt. Mixed failures use the final attempt's category; both 429s
   remain 429. No fallback for validation, upstream auth, or protocol errors.

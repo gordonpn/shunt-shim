@@ -107,6 +107,28 @@ function createAttemptSignal(
   };
 }
 
+// Cancel error bodies instead of buffering untrusted payloads. A faulty stream
+// cleanup hook must not mask the upstream failure or outlive request bounds.
+async function cancelErrorBody(
+  response: Response,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!response.body) return;
+  let onAbort = () => {};
+  const aborted = new Promise<void>((resolve) => {
+    onAbort = resolve;
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([response.body.cancel(), aborted]);
+  } catch {
+    // Cleanup is best effort; preserve the original provider error.
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 interface ProviderConfig {
   name: "groq" | "gemini";
   targetUrl: string;
@@ -436,6 +458,11 @@ export async function forwardChatCompletion(
     );
   }, totalDeadlineMs);
 
+  const cleanupSignal = AbortSignal.any(
+    options?.signal
+      ? [deadlineController.signal, options.signal]
+      : [deadlineController.signal],
+  );
   let fallbackReason: string | undefined;
 
   try {
@@ -508,6 +535,10 @@ export async function forwardChatCompletion(
       fallbackReason = isTimeout ? "connection_timeout" : "network_error";
     } finally {
       primaryAttempt.cleanup();
+    }
+
+    if (primaryResponse && !primaryResponse.ok) {
+      await cancelErrorBody(primaryResponse, cleanupSignal);
     }
 
     if (options?.signal?.aborted) {
@@ -719,6 +750,27 @@ export async function forwardChatCompletion(
       };
     } finally {
       fallbackAttempt.cleanup();
+    }
+
+    if (!fallbackResponse.ok) {
+      await cancelErrorBody(fallbackResponse, cleanupSignal);
+      if (cleanupSignal.aborted) {
+        return {
+          ok: false,
+          status: 504,
+          error: createErrorResponse(
+            "Client closed request or operation timed out",
+            "api_error",
+            "gateway_timeout",
+          ),
+          diagnostic: {
+            provider: fallback.name,
+            model: fallback.model,
+            attempts: 2,
+            fallbackReason,
+          },
+        };
+      }
     }
 
     if (fallbackResponse.ok) {
