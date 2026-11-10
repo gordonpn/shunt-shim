@@ -209,13 +209,25 @@ export function validateChatCompletionRequest(
 
   const record = raw as Record<string, unknown>;
 
-  if (typeof record.model !== "string" || record.model !== "fast") {
-    const requestedModel = typeof record.model === "string" ? record.model : "";
+  if (typeof record.model !== "string" || record.model.trim().length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: createErrorResponse(
+        "Missing required parameter: model",
+        "invalid_request_error",
+        "missing_required_parameter",
+        "model",
+      ),
+    };
+  }
+
+  if (record.model !== "fast") {
     return {
       ok: false,
       status: 404,
       error: createErrorResponse(
-        `The model '${requestedModel}' does not exist or is not available.`,
+        `The model '${record.model}' does not exist or is not available.`,
         "invalid_request_error",
         "model_not_found",
         "model",
