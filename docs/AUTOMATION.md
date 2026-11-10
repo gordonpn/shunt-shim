@@ -92,6 +92,39 @@ Configure the following secrets in repository settings:
 
 When credentials are not configured or on external fork pull requests, deployment jobs skip safely without failing CI checks or exposing secrets.
 
+### Synchronize repository secrets from a local checkout
+
+Install GitHub CLI (`gh`) and authenticate with `gh auth login` using an account
+with permission to manage this repository's Actions secrets. In the repository
+root, copy `.env.example` to `.dev.vars` if needed, then set
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `GATEWAY_TOKENS` there.
+Keep this ignored file local; do not paste credential values into commands.
+
+```bash
+just sync-github-secrets
+gh secret list
+```
+
+Just parses `.dev.vars` as dotenv data; it is not sourced as shell code. Existing
+environment variables take precedence. The command requires the file and all
+three nonempty values, even though deployment verification can otherwise omit
+the gateway token. It validates CLI authentication and all required values
+before writing any secrets to the repository selected by `gh` from this checkout.
+Check the destination with `gh repo view` before running it.
+
+Only those three named secrets are updated, individually through stdin; values
+never appear in CLI arguments or command output. `GROQ_API_KEY` and
+`GEMINI_API_KEY` are removed from the CLI's environment and never synchronized;
+provision them only on the Worker with `just provision-secrets`. Other existing
+repository secrets are left untouched. If a write fails, the command stops and
+identifies the secret by name; earlier writes may already have succeeded. Fix
+access and rerun to converge. `gh secret list` verifies names and update times
+without revealing values.
+
+The mock harness `just test-sync-secrets` exercises missing CLI/authentication,
+missing file/values, stdin-only writes, the allowlist, redaction, and partial
+failure. It also runs in `just check-workflows` without credentials or network.
+
 ### Pull request preview deployments
 
 For pull requests originating from the same repository, the workflow uploads an isolated Worker Version with `preview_urls: true` and alias `pr-<number>` (`just deploy-preview-ci <number>`). This exposes a deterministic preview URL (such as `https://pr-<id>-shunt-shim.<subdomain>.workers.dev`) without altering active production traffic. Post-deployment ingress verification runs against the preview URL. Concurrency group `deploy-preview-<number>` with `cancel-in-progress: true` automatically cancels superseded in-flight uploads.
