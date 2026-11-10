@@ -298,6 +298,8 @@ Example fallback log entry:
 {"timestamp":"2026-10-29T21:44:57.285Z","requestId":"c3a10d92-2310-4f51-b856-02e48aa12d09","status":200,"latencyMs":328,"provider":"gemini","model":"gemini-2.5-flash-lite","fallbackReason":"rate_limit_exceeded","attempts":2}
 ```
 
+Final HTTP 429 and 503 responses preserve only `Retry-After` and the six standard request/token `x-ratelimit-{limit,remaining,reset}-{requests,tokens}` headers from the final attempt. Earlier attempt headers and arbitrary upstream headers are excluded.
+
 ### Quota Diagnostics
 The MVP has no shared quota counters or circuit-breaker state to inspect. Use upstream status codes, rate-limit headers when available, and provider dashboards as the source of truth.
 
