@@ -129,3 +129,7 @@ the same validator as the Worker for required secrets, allowlisted model/provide
 settings, and HTTPS upstream URLs. Invalid optional values fail before deployment;
 error messages name the setting without displaying its value. `just check-secrets`
 remains the lightweight required-secret presence check for automation.
+
+Body ingestion decodes UTF-8 incrementally and counts raw bytes against the 10 MB
+limit. It does not retain a chunk array or allocate a second contiguous byte buffer;
+JSON parsing still requires the complete decoded string.
