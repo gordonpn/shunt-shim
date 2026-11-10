@@ -541,7 +541,7 @@ export async function forwardChatCompletion(
       await cancelErrorBody(primaryResponse, cleanupSignal);
     }
 
-    if (cleanupSignal.aborted) {
+    if (options?.signal?.aborted) {
       return {
         ok: false,
         status: 504,
