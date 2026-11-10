@@ -21,7 +21,8 @@ fi
 names=(CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GATEWAY_TOKENS)
 status=0
 for name in "${names[@]}"; do
-  if [[ -z "${!name:-}" ]]; then
+  val="${!name:-}"
+  if [[ -z "${val//[[:space:]]/}" ]]; then
     printf 'Missing required environment variable: %s\n' "$name" >&2
     status=1
   fi

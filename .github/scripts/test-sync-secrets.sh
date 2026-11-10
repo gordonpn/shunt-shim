@@ -82,11 +82,15 @@ run
 expect_failure 'Missing .dev.vars'
 for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GATEWAY_TOKENS; do
   fixture
-  sed -i "/^$name=/d" "$TMP_DIR/.dev.vars"
+  grep -v "^$name=" "$TMP_DIR/.dev.vars" > "$TMP_DIR/.dev.vars.tmp" && mv "$TMP_DIR/.dev.vars.tmp" "$TMP_DIR/.dev.vars"
   run
   expect_failure "Missing required environment variable: $name"
   fixture
   printf '%s=""\n' "$name" >> "$TMP_DIR/.dev.vars"
+  run
+  expect_failure "Missing required environment variable: $name"
+  fixture
+  printf '%s="   "\n' "$name" >> "$TMP_DIR/.dev.vars"
   run
   expect_failure "Missing required environment variable: $name"
 done
@@ -101,11 +105,13 @@ printf '%s\n' 'auth status' 'secret set CLOUDFLARE_API_TOKEN' \
 cmp -s "$TMP_DIR/calls" "$TMP_DIR/expected-calls" || fail 'Secret appeared in gh arguments'
 
 # Local upstream credentials are optional, and environment values override dotenv.
-sed -i '/^GROQ_API_KEY=/d; /^GEMINI_API_KEY=/d; /^GATEWAY_TOKENS=/d' "$TMP_DIR/.dev.vars"
+grep -Ev '^(GROQ_API_KEY|GEMINI_API_KEY|GATEWAY_TOKENS)=' "$TMP_DIR/.dev.vars" > "$TMP_DIR/.dev.vars.tmp" && mv "$TMP_DIR/.dev.vars.tmp" "$TMP_DIR/.dev.vars"
 run GATEWAY_TOKENS=dummy-gateway-token
 [[ "$status" == 0 ]] || fail 'Environment fallback or absent upstream credentials failed'
 fixture
 run GATEWAY_TOKENS=''
+expect_failure 'Missing required environment variable: GATEWAY_TOKENS'
+run GATEWAY_TOKENS='   '
 expect_failure 'Missing required environment variable: GATEWAY_TOKENS'
 
 run MOCK_FAIL_NAME=CLOUDFLARE_API_TOKEN
