@@ -30,6 +30,12 @@ authentication headers elsewhere in the client do not prove OpenAI-mode support.
 
 ## HTTP and request contract
 
+Token equality checks hash both values with SHA-256 and compare the fixed-size
+digests using Cloudflare Workers’ native `crypto.subtle.timingSafeEqual`,
+including the dual-header consistency check. Header parsing and whitespace
+trimming retain their existing behavior. Hashing time can depend on token length;
+this does not claim constant-time execution for the entire request.
+
 - `POST /v1/chat/completions` and `POST /chat/completions` execute the same handler,
   with identical auth, validation, routing, errors, and non-streaming JSON behavior.
 - `GET /v1/models` returns exactly `fast`. Model names are configured opaque
