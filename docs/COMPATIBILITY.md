@@ -99,7 +99,7 @@ Validation checks run in the following strict sequential pipeline before upstrea
 2. **HTTP Method**: Matched routes requested with unsupported HTTP methods return HTTP 405 Method Not Allowed (`invalid_request_error`) with an `Allow` header prior to authentication.
 3. **Gateway Authentication**: Requests to supported routes with missing, malformed, or invalid credentials return HTTP 401 Unauthorized (`invalid_api_key`).
 4. **Inbound Body Size**: Authenticated requests exceeding 10,485,760 bytes return HTTP 413 Payload Too Large (`payload_too_large`) prior to JSON parsing.
-5. **Payload Schema & Model Alias**: Authenticated requests within size limits are parsed. Malformed JSON or invalid schema (empty messages, unknown roles, or invalid tool calls) returns HTTP 400 Bad Request (`invalid_request_error`). Unknown model aliases (any string other than `fast`) return HTTP 404 Not Found (`model_not_found`).
+5. **Payload Schema & Model Alias**: Authenticated requests within size limits are parsed. Malformed JSON or invalid schema (empty messages, unknown roles, or invalid tool calls) returns HTTP 400 Bad Request (`invalid_request_error`). Missing, non-string, empty, or whitespace-only `model` values return HTTP 400 Bad Request (`missing_required_parameter`, `param=model`). Unknown nonblank model aliases (any string other than `fast`) return HTTP 404 Not Found (`model_not_found`).
 6. **Context & Token Bounds**: Combined token budgets exceeding 128,000 return HTTP 400 Bad Request (`context_length_exceeded`).
 7. **Streaming Parameter Rejection**: Validated requests specifying `stream: true` or `stream_options` return HTTP 400 Bad Request (`unsupported_parameter`) prior to upstream dispatch.
 
@@ -112,7 +112,8 @@ Validation checks run in the following strict sequential pipeline before upstrea
 | Any unrecognized route (e.g., `/v1/embeddings`, `/v1/responses`) | Any | 404 Not Found | `invalid_request_error` | Evaluated at step 1. Unsupported endpoint. Zero upstream invocation. |
 | Supported route | Supported method | 401 Unauthorized | `invalid_api_key` | Evaluated at step 3. Missing, malformed, or mismatching credentials. |
 | Supported route | Supported method | 413 Payload Too Large | `payload_too_large` | Evaluated at step 4. Body size > 10,485,760 bytes. Zero upstream invocation. |
-| `/v1/chat/completions`, `/chat/completions` | POST | 404 Not Found | `model_not_found` | Evaluated at step 5. Unknown model alias (model string other than `fast`). |
+| `/v1/chat/completions`, `/chat/completions` | POST | 400 Bad Request | `missing_required_parameter` | Evaluated at step 5. Missing, non-string, empty, or whitespace-only `model`. |
+| `/v1/chat/completions`, `/chat/completions` | POST | 404 Not Found | `model_not_found` | Evaluated at step 5. Unknown nonblank model alias (model string other than `fast`). |
 | `/v1/chat/completions`, `/chat/completions` | POST | 400 Bad Request | `unsupported_parameter` | Evaluated at step 7. Streaming parameter specified (`stream: true` or `stream_options`). |
 
 ## Response and failure contract
