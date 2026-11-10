@@ -1,4 +1,5 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { constantTimeTokenEqual } from "./auth.js";
 import { type DiagnosticRecord, emitDiagnostic } from "./diagnostics.js";
 import { createErrorResponse } from "./errors.js";
 import {
@@ -192,7 +193,11 @@ export const authMiddleware: GatewayMiddleware = async (c, next) => {
     }
   }
 
-  if (bearerToken && trimmedApiKey && bearerToken !== trimmedApiKey) {
+  if (
+    bearerToken &&
+    trimmedApiKey &&
+    !(await constantTimeTokenEqual(bearerToken, trimmedApiKey))
+  ) {
     return c.json(
       createErrorResponse(
         "Conflicting Authorization and x-api-key headers provided",
@@ -204,7 +209,11 @@ export const authMiddleware: GatewayMiddleware = async (c, next) => {
   }
 
   const token = bearerToken ?? trimmedApiKey;
-  if (!token || !configuredToken || token !== configuredToken) {
+  if (
+    !token ||
+    !configuredToken ||
+    !(await constantTimeTokenEqual(token, configuredToken))
+  ) {
     return c.json(
       createErrorResponse(
         "Incorrect or missing API key provided",
