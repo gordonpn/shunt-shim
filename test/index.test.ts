@@ -45,6 +45,95 @@ describe("Gateway HTTP Entrypoint", () => {
     vi.restoreAllMocks();
   });
 
+  describe("HTTP methods and browser CORS (#69)", () => {
+    for (const path of [
+      "/v1/models",
+      "/v1/chat/completions",
+      "/chat/completions",
+    ]) {
+      const models = path === "/v1/models";
+      it.each(["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])(
+        `${path} %s`,
+        async (method) => {
+          const supported = models
+            ? ["GET", "HEAD"].includes(method)
+            : method === "POST";
+          const res = await app.request(
+            path,
+            {
+              method,
+              headers: {
+                Origin: "https://client.example",
+                Authorization: "Bearer test-token-12345",
+                "Content-Type": "application/json",
+              },
+              ...(method === "POST"
+                ? {
+                    body: JSON.stringify({
+                      model: "fast",
+                      messages: [{ role: "user", content: "hello" }],
+                    }),
+                  }
+                : {}),
+            },
+            mockEnv,
+          );
+          expect(res.status).toBe(
+            method === "OPTIONS" ? 204 : supported ? 200 : 405,
+          );
+          expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+          if (!supported)
+            expect(res.headers.get("Allow")).toBe(
+              models ? "GET, OPTIONS" : "POST, OPTIONS",
+            );
+          if (method === "OPTIONS") {
+            expect(res.headers.get("Access-Control-Allow-Methods")).toContain(
+              models ? "GET" : "POST",
+            );
+            expect(
+              res.headers.get("Access-Control-Allow-Headers")?.toLowerCase(),
+            ).toContain("authorization");
+            expect(await res.text()).toBe("");
+          }
+          if (supported && !models) expect(fetch).toHaveBeenCalledTimes(1);
+          else expect(fetch).not.toHaveBeenCalled();
+        },
+      );
+    }
+    it("allows preflight without credentials but protects actual requests", async () => {
+      const preflight = await app.request("/v1/chat/completions", {
+        method: "OPTIONS",
+        headers: {
+          Origin: "https://client.example",
+          "Access-Control-Request-Method": "POST",
+          "Access-Control-Request-Headers":
+            "authorization,content-type,x-api-key,x-request-id",
+        },
+      });
+      expect(preflight.status).toBe(204);
+      for (const name of [
+        "authorization",
+        "content-type",
+        "x-api-key",
+        "x-request-id",
+      ])
+        expect(
+          preflight.headers.get("Access-Control-Allow-Headers")?.toLowerCase(),
+        ).toContain(name);
+      const denied = await app.request(
+        "/v1/chat/completions",
+        { method: "POST", headers: { Origin: "https://client.example" } },
+        mockEnv,
+      );
+      expect(denied.status).toBe(401);
+      expect(denied.headers.get("Access-Control-Allow-Origin")).toBe("*");
+      expect(fetch).not.toHaveBeenCalled();
+      expect(
+        (await app.request("/missing", { method: "OPTIONS" })).status,
+      ).toBe(404);
+    });
+  });
+
   it("responds with 200 on unauthenticated health endpoints", async () => {
     const rootRes = await app.request("/");
     expect(rootRes.status).toBe(200);

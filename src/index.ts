@@ -1,4 +1,5 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { cors } from "hono/cors";
 import { constantTimeTokenEqual } from "./auth.js";
 import { type DiagnosticRecord, emitDiagnostic } from "./diagnostics.js";
 import { createErrorResponse } from "./errors.js";
@@ -295,6 +296,28 @@ export const app = new Hono<{
 
 app.use("*", diagnosticsMiddleware);
 
+const apiCors = cors({
+  origin: "*",
+  allowMethods: ["GET", "POST", "OPTIONS"],
+  allowHeaders: ["Authorization", "Content-Type", "x-api-key", "x-request-id"],
+  exposeHeaders: ["x-request-id", "Retry-After"],
+});
+for (const path of [
+  "/v1/models",
+  "/v1/chat/completions",
+  "/chat/completions",
+]) {
+  app.use(path, async (c, next) => {
+    if (c.req.method === "OPTIONS") {
+      c.header(
+        "Allow",
+        path === "/v1/models" ? "GET, OPTIONS" : "POST, OPTIONS",
+      );
+    }
+    return apiCors(c, next);
+  });
+}
+
 app.get("/", (c) => {
   return c.json({ status: "ok", service: "shunt-shim" });
 });
@@ -396,7 +419,7 @@ app.post(
 );
 
 app.on(
-  ["GET", "PUT", "DELETE", "PATCH"],
+  ["GET", "HEAD", "PUT", "DELETE", "PATCH"],
   ["/v1/chat/completions", "/chat/completions"],
   (c) => {
     c.header("Allow", "POST, OPTIONS");
