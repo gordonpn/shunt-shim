@@ -10,6 +10,7 @@ export interface IngressVerifyOptions {
   baseUrl: string;
   token?: string | undefined;
   live?: boolean | undefined;
+  resource?: boolean | undefined;
   timeoutMs?: number | undefined;
 }
 
@@ -248,6 +249,15 @@ export async function runIngressVerification(
       timeoutMs,
     ),
   );
+
+  if (options.resource && !token) {
+    results.push({
+      name: "Maximum-body resource verification",
+      passed: false,
+      message: "--resource requires a token. Set GATEWAY_TOKENS.",
+      durationMs: 0,
+    });
+  }
 
   if (options.live && !token) {
     results.push({
@@ -498,6 +508,48 @@ export async function runIngressVerification(
       ),
     );
 
+    // Opt-in exact-limit body parsing. Streaming rejection avoids provider quota use.
+    if (options.resource) {
+      results.push(
+        await executeProbe(
+          "POST /v1/chat/completions (exact 10 MB JSON body)",
+          async (signal) => {
+            const prefix = JSON.stringify({
+              model: "fast",
+              messages: [{ role: "user", content: "test" }],
+              stream: true,
+              padding: "",
+            });
+            const body =
+              prefix.slice(0, -2) +
+              "x".repeat(10 * 1024 * 1024 - prefix.length) +
+              '\"}';
+            const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+              method: "POST",
+              headers: authHeaders,
+              body,
+              signal,
+            });
+            const payload = (await res.json()) as {
+              error?: { code?: string; param?: string };
+            };
+            const passed =
+              res.status === 400 &&
+              payload.error?.code === "unsupported_parameter" &&
+              payload.error.param === "stream";
+            return {
+              passed,
+              status: res.status,
+              message: passed
+                ? "Parsed exactly 10,485,760 bytes; streaming rejected before upstream dispatch"
+                : "Expected HTTP 400 unsupported_parameter for stream at the exact body limit",
+            };
+          },
+          timeoutMs,
+        ),
+      );
+    }
+
     // Probe 12: Optional Live Chat Completion
     if (options.live) {
       results.push(
@@ -602,6 +654,7 @@ export function parseArgs(
   let baseUrl: string | undefined;
   let token = process.env.GATEWAY_TOKENS?.trim() || undefined;
   let live = false;
+  let resource = false;
   let timeoutMs: number | undefined;
 
   let i = 0;
@@ -614,6 +667,12 @@ export function parseArgs(
 
     if (arg === "-h" || arg === "--help") {
       return "help";
+    }
+
+    if (arg === "--resource") {
+      resource = true;
+      i++;
+      continue;
     }
 
     if (arg === "--live") {
@@ -679,6 +738,7 @@ export function parseArgs(
     baseUrl,
     ...(token !== undefined ? { token } : {}),
     ...(live ? { live } : {}),
+    ...(resource ? { resource } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   };
 }
@@ -691,6 +751,7 @@ Arguments:
 
 Options:
   --token <token>         Gateway bearer token (defaults to GATEWAY_TOKENS environment variable if set)
+  --resource              Parse an exact 10 MB body without contacting providers (requires token)
   --live                  Execute live end-to-end chat completion against upstream model
   --timeout <ms>          Timeout per probe in milliseconds (default: 15000)
   -h, --help              Display this help message

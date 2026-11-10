@@ -125,9 +125,9 @@ To roll back immediately to the previous deployment if an issue arises:
 just rollback
 ```
 
-To roll back to a specific deployment version ID:
+To roll back to a specific Worker version ID (not the deployment ID):
 ```bash
-just rollback <deployment-id>
+just rollback <worker-version-id>
 ```
 
 ### Step 5: Preview Deployments and Automated Delivery
@@ -169,6 +169,18 @@ To execute a live end-to-end chat completion against the primary upstream model 
 just verify-ingress-live https://shunt-shim.<subdomain>.workers.dev
 ```
 
+### Maximum-body and deployment evidence
+
+```bash
+just verify-ingress-resource "$BASE_URL"
+```
+
+This opt-in probe parses an exact 10 MB JSON body and expects streaming rejection
+before upstream dispatch. It does not consume provider quota. Record live probe,
+resource, disconnect/deadline, and rollback outcomes using the
+[deployment evidence checklist](DEPLOYMENT_EVIDENCE.md). Do not mark #38 complete
+from mocked tests or health checks alone. SSE streaming remains outside the MVP.
+
 ### Automated Ingress Probes Executed
 The `verify-ingress` script executes the following checks:
 1. `GET /`: Unauthenticated root probe returns HTTP 200 `{ status: "ok", service: "shunt-shim" }` and verifies `x-request-id` response header presence.
@@ -186,20 +198,26 @@ The `verify-ingress` script executes the following checks:
 
 ### Manual Smoke Testing via curl
 
-Export the configured gateway token in the active shell:
+Set the actual URL printed by deployment and enter the gateway token without
+saving it in shell history (Bash):
 ```bash
-export GATEWAY_TOKENS="$(sed -n 's/^GATEWAY_TOKENS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' .dev.vars)"
+export BASE_URL="https://shunt-shim.<your-subdomain>.workers.dev"
+read -rsp 'Gateway token: ' GATEWAY_TOKENS; echo
+export GATEWAY_TOKENS
 ```
+
+The examples below use this deployed URL; set `BASE_URL=http://127.0.0.1:8787`
+to test locally. They use the gateway token, never upstream provider keys.
 
 #### Verify Unauthenticated Health Endpoints
 ```bash
-curl -i -s "http://127.0.0.1:8787/health"
+curl -i -s "${BASE_URL}/health"
 ```
 Expected response: HTTP 200 with `{"status":"ok","service":"shunt-shim"}`.
 
 #### Verify Virtual Models Catalog
 ```bash
-curl -s -X GET "http://127.0.0.1:8787/v1/models" \
+curl -s -X GET "${BASE_URL}/v1/models" \
   -H "Authorization: Bearer ${GATEWAY_TOKENS}" | jq .
 ```
 Expected response:
@@ -214,7 +232,7 @@ Expected response:
 
 #### Test Non-Streaming Chat Completion (`fast` alias)
 ```bash
-curl -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
+curl --max-time 65 -sS -X POST "${BASE_URL}/v1/chat/completions" \
   -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -229,7 +247,7 @@ Expected response: HTTP 200 with OpenAI-compatible JSON completion.
 #### Verify Streaming Request Rejection (`stream: true`)
 Streaming is deferred to post-MVP. Verify that requests with `stream: true` are rejected with HTTP 400 Bad Request:
 ```bash
-curl -i -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
+curl -i -s -X POST "${BASE_URL}/v1/chat/completions" \
   -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -254,7 +272,7 @@ Expected response: HTTP 400 Bad Request with:
 
 #### Verify Authentication Enforcement
 ```bash
-curl -i -X GET "http://127.0.0.1:8787/v1/models" \
+curl -i -X GET "${BASE_URL}/v1/models" \
   -H "Authorization: Bearer invalid-token"
 ```
 Verify that the server rejects the request with HTTP `401 Unauthorized`.
