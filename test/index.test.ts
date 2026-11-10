@@ -749,9 +749,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           PRIMARY_MODEL: "llama-3.3-70b-versatile",
         }),
-      ).toThrow(
-        "Disallowed PRIMARY_MODEL configuration: llama-3.3-70b-versatile",
-      );
+      ).toThrow("Disallowed PRIMARY_MODEL configuration");
 
       expect(() =>
         validateEnvironment({
@@ -760,7 +758,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           PRIMARY_MODEL: "openai/gpt-oss-120b",
         }),
-      ).toThrow("Disallowed PRIMARY_MODEL configuration: openai/gpt-oss-120b");
+      ).toThrow("Disallowed PRIMARY_MODEL configuration");
     });
 
     it("throws explicit error when FALLBACK_MODEL is disallowed", () => {
@@ -771,7 +769,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           FALLBACK_MODEL: "gemini-1.5-pro",
         }),
-      ).toThrow("Disallowed FALLBACK_MODEL configuration: gemini-1.5-pro");
+      ).toThrow("Disallowed FALLBACK_MODEL configuration");
     });
 
     it("throws explicit error when PRIMARY_PROVIDER is disallowed", () => {
@@ -782,7 +780,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           PRIMARY_PROVIDER: "anthropic" as unknown as "groq",
         }),
-      ).toThrow("Disallowed PRIMARY_PROVIDER configuration: anthropic");
+      ).toThrow("Disallowed PRIMARY_PROVIDER configuration");
     });
 
     it("accepts valid https URLs for GROQ_BASE_URL and GEMINI_BASE_URL", () => {
@@ -825,7 +823,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           GROQ_BASE_URL: "not a valid url",
         }),
-      ).toThrow("Invalid GROQ_BASE_URL configuration: not a valid url");
+      ).toThrow("Invalid GROQ_BASE_URL configuration: must be a valid URL");
 
       expect(() =>
         validateEnvironment({
@@ -834,7 +832,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           GEMINI_BASE_URL: "not a valid url",
         }),
-      ).toThrow("Invalid GEMINI_BASE_URL configuration: not a valid url");
+      ).toThrow("Invalid GEMINI_BASE_URL configuration: must be a valid URL");
     });
 
     it("ensures error messages never leak secret values across validation cases", () => {
@@ -854,8 +852,7 @@ describe("Gateway HTTP Entrypoint", () => {
             GEMINI_API_KEY: "gemini-key",
             PRIMARY_MODEL: "disallowed-primary",
           },
-          expectedError:
-            "Disallowed PRIMARY_MODEL configuration: disallowed-primary",
+          expectedError: "Disallowed PRIMARY_MODEL configuration",
         },
       ];
 

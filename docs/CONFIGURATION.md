@@ -121,3 +121,11 @@ Client applications must configure non-streaming completions (`stream: false` or
 The MVP accepts only one random bearer-token secret configured via `GATEWAY_TOKENS`. Multi-tenant token catalogs (`sk-proj-*`), priority tiers, context-based model switching, and shared usage counters are deferred beyond the MVP.
 
 No KV namespace or database is provisioned. Upstream HTTP status codes (HTTP 429, HTTP 503) and connection timeouts drive bounded fallback directly.
+
+## Validate before deployment
+
+Run `just check-env` after setting `.dev.vars` or environment bindings. It uses
+the same validator as the Worker for required secrets, allowlisted model/provider
+settings, and HTTPS upstream URLs. Invalid optional values fail before deployment;
+error messages name the setting without displaying its value. `just check-secrets`
+remains the lightweight required-secret presence check for automation.
