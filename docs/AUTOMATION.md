@@ -5,6 +5,11 @@ This transfer does not select a gateway runtime or implement the gateway.
 
 ## Workflow quality gates
 
+CI, CodeQL, and Reviewdog cancel superseded runs for the same pull request,
+using separate concurrency groups per workflow and PR number. Push and scheduled
+runs use unique run IDs and do not cancel each other. Deployment concurrency
+continues to be controlled by the deployment workflow.
+
 CI runs on main-branch pushes and pull requests. Workflow checks run immediately;
 the pnpm test job executes because `package.json` and `pnpm-lock.yaml` are present.
 The project provides `format:check`, `lint`, `typecheck`, `test`, `test:coverage`,
