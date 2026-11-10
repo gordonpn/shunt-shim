@@ -20,6 +20,10 @@ review-docs:
 dev *args:
     pnpm exec wrangler dev {{ args }}
 
+# Verify local edge development server startup and health without credentials
+verify-dev:
+    bash .github/scripts/verify-dev.sh
+
 # Build edge worker bundle for deployment verification
 build:
     pnpm run build
