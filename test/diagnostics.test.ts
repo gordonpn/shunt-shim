@@ -104,6 +104,63 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
     );
   };
 
+  describe("Final upstream HTTP status (#72)", () => {
+    it.each([200, 400, 401, 403, 500])(
+      "captures primary HTTP %i",
+      async (status) => {
+        captureFetch(() =>
+          status === 200
+            ? Response.json(groqFixtures.textCompletion)
+            : new Response(SECRET_ERROR_LEAK, { status }),
+        );
+        await postChat();
+        expect(capturedRecords[0]?.upstreamStatus).toBe(status);
+        expect(JSON.parse(capturedLogs[0] ?? "{}").upstreamStatus).toBe(status);
+        expect(capturedLogs.join("")).not.toContain(SECRET_ERROR_LEAK);
+      },
+    );
+
+    it.each([200, 429, 503, 400, 500])(
+      "captures final fallback HTTP %i",
+      async (status) => {
+        captureFetch((url) =>
+          isGroqRequest(url)
+            ? new Response(null, { status: 429 })
+            : status === 200
+              ? Response.json(geminiFixtures.textCompletion)
+              : new Response(null, { status }),
+        );
+        await postChat();
+        expect(capturedRecords[0]?.upstreamStatus).toBe(status);
+      },
+    );
+
+    it("omits HTTP status when the final attempt has no response", async () => {
+      captureFetch((url) => {
+        if (isGroqRequest(url)) return new Response(null, { status: 429 });
+        throw new Error("network error");
+      });
+      await postChat();
+      expect(capturedRecords[0]).not.toHaveProperty("upstreamStatus");
+    });
+
+    it("omits HTTP status before dispatch", async () => {
+      captureFetch(() => {
+        throw new Error("No dispatch expected");
+      });
+      await postChat({}, mockEnv, "Bearer invalid");
+      await postChat({});
+      await app.request("/missing");
+      await postChat("x", mockEnv, `Bearer ${SECRET_GATEWAY_TOKEN}`, {
+        "content-length": "10485761",
+      });
+      expect(capturedRecords).toHaveLength(4);
+      for (const record of capturedRecords)
+        expect(record).not.toHaveProperty("upstreamStatus");
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Metadata Allowlist and Normal Diagnostic Emission", () => {
     it("emits structured metadata on primary success without fabricating fallback", async () => {
       captureFetch(async (url) => {
@@ -588,6 +645,7 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
         "timestamp",
         "requestId",
         "status",
+        "upstreamStatus",
         "latencyMs",
         "provider",
         "model",

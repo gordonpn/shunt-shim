@@ -267,6 +267,9 @@ export const diagnosticsMiddleware: GatewayMiddleware = async (c, next) => {
       requestId,
       status,
       latencyMs,
+      ...(upstreamDiagnostic?.upstreamStatus !== undefined
+        ? { upstreamStatus: upstreamDiagnostic.upstreamStatus }
+        : {}),
       ...(upstreamDiagnostic?.provider !== undefined
         ? { provider: upstreamDiagnostic.provider }
         : {}),

@@ -49,6 +49,7 @@ export interface UpstreamDiagnosticMetadata {
   provider?: "groq" | "gemini";
   model?: string;
   attempts?: number;
+  upstreamStatus?: number;
   fallbackReason?: string | undefined;
 }
 
@@ -504,6 +505,9 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
+            ...(primaryResponse
+              ? { upstreamStatus: primaryResponse.status }
+              : {}),
           },
         };
       }
@@ -523,6 +527,9 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
+            ...(primaryResponse
+              ? { upstreamStatus: primaryResponse.status }
+              : {}),
           },
         };
       }
@@ -554,6 +561,9 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...(primaryResponse
+            ? { upstreamStatus: primaryResponse.status }
+            : {}),
         },
       };
     }
@@ -575,6 +585,9 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
+            ...(primaryResponse
+              ? { upstreamStatus: primaryResponse.status }
+              : {}),
           },
         };
       }
@@ -593,6 +606,9 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
+            ...(primaryResponse
+              ? { upstreamStatus: primaryResponse.status }
+              : {}),
           },
         };
       }
@@ -604,6 +620,9 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...(primaryResponse
+            ? { upstreamStatus: primaryResponse.status }
+            : {}),
         },
       };
     }
@@ -631,6 +650,9 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...(primaryResponse
+            ? { upstreamStatus: primaryResponse.status }
+            : {}),
         },
       };
     }
@@ -650,6 +672,9 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...(primaryResponse
+            ? { upstreamStatus: primaryResponse.status }
+            : {}),
           fallbackReason,
         },
       };
@@ -668,6 +693,9 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...(primaryResponse
+            ? { upstreamStatus: primaryResponse.status }
+            : {}),
           fallbackReason,
         },
       };
@@ -790,6 +818,7 @@ export async function forwardChatCompletion(
             provider: fallback.name,
             model: fallback.model,
             attempts: 2,
+            upstreamStatus: fallbackResponse.status,
             fallbackReason,
           },
         };
@@ -809,6 +838,7 @@ export async function forwardChatCompletion(
             provider: fallback.name,
             model: fallback.model,
             attempts: 2,
+            upstreamStatus: fallbackResponse.status,
             fallbackReason,
           },
         };
@@ -821,6 +851,7 @@ export async function forwardChatCompletion(
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
@@ -845,6 +876,7 @@ export async function forwardChatCompletion(
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
@@ -863,6 +895,7 @@ export async function forwardChatCompletion(
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
@@ -880,6 +913,7 @@ export async function forwardChatCompletion(
         provider: fallback.name,
         model: fallback.model,
         attempts: 2,
+        upstreamStatus: fallbackResponse.status,
         fallbackReason,
       },
     };

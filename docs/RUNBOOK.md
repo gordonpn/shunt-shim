@@ -274,7 +274,8 @@ Every request emits a single structured JSON line upon completion. To safeguard 
 |---|---|---|
 | `timestamp` | string | ISO 8601 UTC timestamp of request completion. |
 | `requestId` | string | Correlation identifier from `x-request-id` header or generated UUID. |
-| `status` | number | HTTP response status code. |
+| `status` | number | Gateway HTTP response status code. |
+| `upstreamStatus` | number (optional) | Final attempted provider HTTP status. Omitted before dispatch or when that attempt received no HTTP response. |
 | `latencyMs` | number | Total request execution duration in milliseconds. |
 | `provider` | string (optional) | Upstream provider serving the request (`groq` or `gemini`). Omitted on pre-dispatch rejections. |
 | `model` | string (optional) | Concrete upstream model name. Omitted on pre-dispatch rejections. |

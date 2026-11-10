@@ -6,6 +6,7 @@ export interface DiagnosticRecord {
   timestamp: string;
   requestId: string;
   status: number;
+  upstreamStatus?: number;
   latencyMs: number;
   provider?: "groq" | "gemini";
   model?: string;
@@ -17,6 +18,7 @@ export const DIAGNOSTIC_ALLOWLIST: readonly (keyof DiagnosticRecord)[] = [
   "timestamp",
   "requestId",
   "status",
+  "upstreamStatus",
   "latencyMs",
   "provider",
   "model",
