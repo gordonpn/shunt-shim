@@ -524,9 +524,6 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
-            ...(primaryResponse
-              ? { upstreamStatus: primaryResponse.status }
-              : {}),
           },
         };
       }
@@ -546,9 +543,6 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
-            ...(primaryResponse
-              ? { upstreamStatus: primaryResponse.status }
-              : {}),
           },
         };
       }
@@ -562,6 +556,10 @@ export async function forwardChatCompletion(
     } finally {
       primaryAttempt.cleanup();
     }
+
+    const primaryStatus = primaryResponse
+      ? { upstreamStatus: primaryResponse.status }
+      : {};
 
     if (primaryResponse && !primaryResponse.ok) {
       await cancelErrorBody(primaryResponse, cleanupSignal);
@@ -580,9 +578,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
-          ...(primaryResponse
-            ? { upstreamStatus: primaryResponse.status }
-            : {}),
+          ...primaryStatus,
         },
       };
     }
@@ -604,9 +600,7 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
-            ...(primaryResponse
-              ? { upstreamStatus: primaryResponse.status }
-              : {}),
+            ...primaryStatus,
           },
         };
       }
@@ -625,9 +619,7 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
-            ...(primaryResponse
-              ? { upstreamStatus: primaryResponse.status }
-              : {}),
+            ...primaryStatus,
           },
         };
       }
@@ -639,9 +631,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
-          ...(primaryResponse
-            ? { upstreamStatus: primaryResponse.status }
-            : {}),
+          ...primaryStatus,
         },
       };
     }
@@ -669,9 +659,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
-          ...(primaryResponse
-            ? { upstreamStatus: primaryResponse.status }
-            : {}),
+          ...primaryStatus,
         },
       };
     }
@@ -691,9 +679,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
-          ...(primaryResponse
-            ? { upstreamStatus: primaryResponse.status }
-            : {}),
+          ...primaryStatus,
           fallbackReason,
         },
       };
@@ -712,9 +698,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
-          ...(primaryResponse
-            ? { upstreamStatus: primaryResponse.status }
-            : {}),
+          ...primaryStatus,
           fallbackReason,
         },
       };
@@ -815,6 +799,7 @@ export async function forwardChatCompletion(
             model: fallback.model,
             attempts: 2,
             fallbackReason,
+            upstreamStatus: fallbackResponse.status,
           },
         };
       }
