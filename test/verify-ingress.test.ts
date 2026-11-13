@@ -336,6 +336,30 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
       expect(summary.failed).toBe(1);
     });
 
+    it("preserves status and request ID when the resource response is not JSON", async () => {
+      const normalFetch = vi.mocked(fetch).getMockImplementation();
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (typeof init?.body === "string" && init.body.length === 10485760) {
+          return new Response("<html>proxy failure</html>", {
+            status: 502,
+            headers: { "x-request-id": "resource-failure-123" },
+          });
+        }
+        if (!normalFetch) throw new Error("Missing mock");
+        return normalFetch(input, init);
+      });
+      const summary = await runIngressVerification({
+        baseUrl: targetUrl,
+        token: testToken,
+        resource: true,
+      });
+      expect(summary.failed).toBe(1);
+      const probe = summary.results.find((r) => r.name.includes("exact 10 MB"));
+      expect(probe).toMatchObject({ passed: false, status: 502 });
+      expect(probe?.message).toContain("request ID: resource-failure-123");
+      expect(probe?.message).not.toContain("<html>");
+    });
+
     it("verifies live probe succeeds when --live is enabled", async () => {
       const summary = await runIngressVerification({
         baseUrl: targetUrl,

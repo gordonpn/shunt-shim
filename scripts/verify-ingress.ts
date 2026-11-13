@@ -530,19 +530,27 @@ export async function runIngressVerification(
               body,
               signal,
             });
-            const payload = (await res.json()) as {
-              error?: { code?: string; param?: string };
-            };
+            const requestId = res.headers.get("x-request-id") ?? "missing";
+            let payload: { error?: { code?: string; param?: string } } | null;
+            try {
+              payload = await res.json();
+            } catch {
+              return {
+                passed: false,
+                status: res.status,
+                message: `Unable to read resource response as JSON; request ID: ${requestId}`,
+              };
+            }
             const passed =
               res.status === 400 &&
-              payload.error?.code === "unsupported_parameter" &&
+              payload?.error?.code === "unsupported_parameter" &&
               payload.error.param === "stream";
             return {
               passed,
               status: res.status,
               message: passed
-                ? `Parsed exactly 10,485,760 bytes; streaming rejected before upstream dispatch; request ID: ${res.headers.get("x-request-id") ?? "missing"}`
-                : `Expected HTTP 400 unsupported_parameter for stream at the exact body limit; request ID: ${res.headers.get("x-request-id") ?? "missing"}`,
+                ? `Parsed exactly 10,485,760 bytes; streaming rejected before upstream dispatch; request ID: ${requestId}`
+                : `Expected HTTP 400 unsupported_parameter for stream at the exact body limit; request ID: ${requestId}`,
             };
           },
           timeoutMs,
