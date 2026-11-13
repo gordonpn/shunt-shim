@@ -49,6 +49,7 @@ export interface UpstreamDiagnosticMetadata {
   provider?: "groq" | "gemini";
   model?: string;
   attempts?: number;
+  upstreamStatus?: number;
   fallbackReason?: string | undefined;
 }
 
@@ -68,6 +69,25 @@ export type UpstreamCompletionResult =
       headers?: Record<string, string>;
       diagnostic: UpstreamDiagnosticMetadata;
     };
+
+const RETRY_HEADERS = [
+  "Retry-After",
+  "x-ratelimit-limit-requests",
+  "x-ratelimit-limit-tokens",
+  "x-ratelimit-remaining-requests",
+  "x-ratelimit-remaining-tokens",
+  "x-ratelimit-reset-requests",
+  "x-ratelimit-reset-tokens",
+] as const;
+
+function getRetryHeaders(response: Response): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const name of RETRY_HEADERS) {
+    const value = response.headers.get(name);
+    if (value !== null) headers[name] = value;
+  }
+  return headers;
+}
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
 const DEFAULT_TOTAL_DEADLINE_MS = 60000;
@@ -537,6 +557,10 @@ export async function forwardChatCompletion(
       primaryAttempt.cleanup();
     }
 
+    const primaryStatus = primaryResponse
+      ? { upstreamStatus: primaryResponse.status }
+      : {};
+
     if (primaryResponse && !primaryResponse.ok) {
       await cancelErrorBody(primaryResponse, cleanupSignal);
     }
@@ -554,6 +578,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
         },
       };
     }
@@ -575,6 +600,7 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
+            ...primaryStatus,
           },
         };
       }
@@ -593,6 +619,7 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
+            ...primaryStatus,
           },
         };
       }
@@ -604,6 +631,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
         },
       };
     }
@@ -631,6 +659,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
         },
       };
     }
@@ -650,6 +679,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
           fallbackReason,
         },
       };
@@ -668,6 +698,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
           fallbackReason,
         },
       };
@@ -768,6 +799,7 @@ export async function forwardChatCompletion(
             model: fallback.model,
             attempts: 2,
             fallbackReason,
+            upstreamStatus: fallbackResponse.status,
           },
         };
       }
@@ -790,6 +822,7 @@ export async function forwardChatCompletion(
             provider: fallback.name,
             model: fallback.model,
             attempts: 2,
+            upstreamStatus: fallbackResponse.status,
             fallbackReason,
           },
         };
@@ -809,6 +842,7 @@ export async function forwardChatCompletion(
             provider: fallback.name,
             model: fallback.model,
             attempts: 2,
+            upstreamStatus: fallbackResponse.status,
             fallbackReason,
           },
         };
@@ -821,17 +855,13 @@ export async function forwardChatCompletion(
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
     }
 
     if (fallbackResponse.status === 429) {
-      const retryAfter = fallbackResponse.headers.get("Retry-After");
-      const headers: Record<string, string> = {};
-      if (retryAfter) {
-        headers["Retry-After"] = retryAfter;
-      }
       return {
         ok: false,
         status: 429,
@@ -840,11 +870,12 @@ export async function forwardChatCompletion(
           "invalid_request_error",
           "rate_limit_exceeded",
         ),
-        headers,
+        headers: getRetryHeaders(fallbackResponse),
         diagnostic: {
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
@@ -854,6 +885,7 @@ export async function forwardChatCompletion(
       return {
         ok: false,
         status: 503,
+        headers: getRetryHeaders(fallbackResponse),
         error: createErrorResponse(
           "All upstream providers are currently unavailable",
           "api_error",
@@ -863,6 +895,7 @@ export async function forwardChatCompletion(
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
@@ -880,6 +913,7 @@ export async function forwardChatCompletion(
         provider: fallback.name,
         model: fallback.model,
         attempts: 2,
+        upstreamStatus: fallbackResponse.status,
         fallbackReason,
       },
     };

@@ -45,7 +45,8 @@ export async function readRequestBodyWithLimit(
   }
 
   const reader = bodyStream.getReader();
-  const chunks: Uint8Array[] = [];
+  const decoder = new TextDecoder();
+  let text = "";
   let totalBytes = 0;
 
   try {
@@ -67,7 +68,7 @@ export async function readRequestBodyWithLimit(
           ),
         };
       }
-      chunks.push(value);
+      text += decoder.decode(value, { stream: true });
     }
   } catch {
     return {
@@ -79,6 +80,8 @@ export async function readRequestBodyWithLimit(
         "invalid_json",
       ),
     };
+  } finally {
+    reader.releaseLock();
   }
 
   if (totalBytes === 0) {
@@ -93,14 +96,7 @@ export async function readRequestBodyWithLimit(
     };
   }
 
-  const merged = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-
-  const text = new TextDecoder().decode(merged);
+  text += decoder.decode();
   return { ok: true, text };
 }
 

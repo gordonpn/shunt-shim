@@ -107,6 +107,10 @@ check-secrets:
     fi; \
     exit $status
 
+# Validate secrets and optional settings using the runtime validator
+check-env:
+    @node --experimental-strip-types scripts/check-env.mjs
+
 # Verify secret check behavior against edge cases
 test-secrets:
     bash .github/scripts/test-check-secrets.sh

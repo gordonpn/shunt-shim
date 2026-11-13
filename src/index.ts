@@ -1,6 +1,8 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { cors } from "hono/cors";
 import { constantTimeTokenEqual } from "./auth.js";
 import { type DiagnosticRecord, emitDiagnostic } from "./diagnostics.js";
+import { type GatewayEnv, validateEnvironment } from "./environment.js";
 import { createErrorResponse } from "./errors.js";
 import {
   forwardChatCompletion,
@@ -51,96 +53,6 @@ export {
   type ValidatedToolChoice,
   validateChatCompletionRequest,
 } from "./validation.js";
-
-export interface GatewayEnv {
-  GATEWAY_TOKENS?: string;
-  GEMINI_API_KEY?: string;
-  GROQ_API_KEY?: string;
-  PRIMARY_MODEL?: string;
-  FALLBACK_MODEL?: string;
-  PRIMARY_PROVIDER?: "groq" | "gemini";
-  GROQ_BASE_URL?: string;
-  GEMINI_BASE_URL?: string;
-}
-
-export const ALLOWED_PRIMARY_PROVIDERS = ["groq", "gemini"] as const;
-
-export const ALLOWED_PRIMARY_MODELS = ["qwen/qwen3.8-27b"] as const;
-
-export const ALLOWED_FALLBACK_MODELS = ["gemini-2.5-flash-lite"] as const;
-
-/**
- * Validates the required and optional gateway environment variables.
- *
- * @param env - Environment bindings containing secrets and model configuration.
- * @throws Error if any required secret is missing or if configured models are not allowed.
- */
-export function validateEnvironment(env: GatewayEnv): void {
-  const gatewayTokens = env.GATEWAY_TOKENS?.trim();
-  if (!gatewayTokens) {
-    throw new Error("Missing required environment secret: GATEWAY_TOKENS");
-  }
-
-  const groqApiKey = env.GROQ_API_KEY?.trim();
-  if (!groqApiKey) {
-    throw new Error("Missing required environment secret: GROQ_API_KEY");
-  }
-
-  const geminiApiKey = env.GEMINI_API_KEY?.trim();
-  if (!geminiApiKey) {
-    throw new Error("Missing required environment secret: GEMINI_API_KEY");
-  }
-
-  if (env.PRIMARY_MODEL !== undefined) {
-    const isAllowedPrimary = (
-      ALLOWED_PRIMARY_MODELS as readonly string[]
-    ).includes(env.PRIMARY_MODEL);
-    if (!isAllowedPrimary) {
-      throw new Error(
-        `Disallowed PRIMARY_MODEL configuration: ${env.PRIMARY_MODEL}`,
-      );
-    }
-  }
-
-  if (env.FALLBACK_MODEL !== undefined) {
-    const isAllowedFallback = (
-      ALLOWED_FALLBACK_MODELS as readonly string[]
-    ).includes(env.FALLBACK_MODEL);
-    if (!isAllowedFallback) {
-      throw new Error(
-        `Disallowed FALLBACK_MODEL configuration: ${env.FALLBACK_MODEL}`,
-      );
-    }
-  }
-
-  if (env.PRIMARY_PROVIDER !== undefined) {
-    const isAllowedProvider = (
-      ALLOWED_PRIMARY_PROVIDERS as readonly string[]
-    ).includes(env.PRIMARY_PROVIDER);
-    if (!isAllowedProvider) {
-      throw new Error(
-        `Disallowed PRIMARY_PROVIDER configuration: ${env.PRIMARY_PROVIDER}`,
-      );
-    }
-  }
-
-  for (const [name, value] of [
-    ["GROQ_BASE_URL", env.GROQ_BASE_URL],
-    ["GEMINI_BASE_URL", env.GEMINI_BASE_URL],
-  ] as const) {
-    if (value !== undefined) {
-      let parsed: URL;
-      try {
-        parsed = new URL(value);
-      } catch {
-        throw new Error(`Invalid ${name} configuration: ${value}`);
-      }
-      if (parsed.protocol !== "https:") {
-        throw new Error(`Disallowed ${name} protocol: must use https`);
-      }
-    }
-  }
-}
 
 export interface GatewayVariables {
   requestId: string;
@@ -267,6 +179,9 @@ export const diagnosticsMiddleware: GatewayMiddleware = async (c, next) => {
       requestId,
       status,
       latencyMs,
+      ...(upstreamDiagnostic?.upstreamStatus !== undefined
+        ? { upstreamStatus: upstreamDiagnostic.upstreamStatus }
+        : {}),
       ...(upstreamDiagnostic?.provider !== undefined
         ? { provider: upstreamDiagnostic.provider }
         : {}),
@@ -291,6 +206,28 @@ export const app = new Hono<{
 }>();
 
 app.use("*", diagnosticsMiddleware);
+
+const apiCors = cors({
+  origin: "*",
+  allowMethods: ["GET", "POST", "OPTIONS"],
+  allowHeaders: ["Authorization", "Content-Type", "x-api-key", "x-request-id"],
+  exposeHeaders: ["x-request-id", "Retry-After"],
+});
+for (const path of [
+  "/v1/models",
+  "/v1/chat/completions",
+  "/chat/completions",
+]) {
+  app.use(path, async (c, next) => {
+    if (c.req.method === "OPTIONS") {
+      c.header(
+        "Allow",
+        path === "/v1/models" ? "GET, OPTIONS" : "POST, OPTIONS",
+      );
+    }
+    return apiCors(c, next);
+  });
+}
 
 app.get("/", (c) => {
   return c.json({ status: "ok", service: "shunt-shim" });
@@ -393,7 +330,7 @@ app.post(
 );
 
 app.on(
-  ["GET", "PUT", "DELETE", "PATCH"],
+  ["GET", "HEAD", "PUT", "DELETE", "PATCH"],
   ["/v1/chat/completions", "/chat/completions"],
   (c) => {
     c.header("Allow", "POST, OPTIONS");
@@ -416,3 +353,11 @@ app.notFound((c) => {
 });
 
 export default app;
+
+export {
+  ALLOWED_FALLBACK_MODELS,
+  ALLOWED_PRIMARY_MODELS,
+  ALLOWED_PRIMARY_PROVIDERS,
+  type GatewayEnv,
+  validateEnvironment,
+} from "./environment.js";

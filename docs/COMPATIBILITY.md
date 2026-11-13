@@ -103,12 +103,22 @@ Validation checks run in the following strict sequential pipeline before upstrea
 6. **Context & Token Bounds**: Combined token budgets exceeding 128,000 return HTTP 400 Bad Request (`context_length_exceeded`).
 7. **Streaming Parameter Rejection**: Validated requests specifying `stream: true` or `stream_options` return HTTP 400 Bad Request (`unsupported_parameter`) prior to upstream dispatch.
 
+### Browser access
+
+The three API paths support unauthenticated `OPTIONS` preflights (HTTP 204),
+with `Allow: GET, OPTIONS` for models and `Allow: POST, OPTIONS` for completions.
+CORS permits any origin with explicit Authorization or x-api-key headers;
+cookie credentials are not enabled. Actual requests still require gateway authentication.
+CORS headers also accompany API errors. Browser clients may read `x-request-id`
+and `Retry-After`. HEAD follows GET semantics for models and returns 405 for completions.
+Unknown paths remain 404, including OPTIONS requests.
+
 ### Unsupported methods and endpoints
 
 | Endpoint Path | HTTP Method | Gateway Status | Error Code | Response Details |
 | :--- | :--- | :--- | :--- | :--- |
-| `/v1/chat/completions`, `/chat/completions` | GET, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Evaluated at step 2. Header `Allow: POST`. Zero upstream invocation. |
-| `/v1/models` | POST, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Evaluated at step 2. Header `Allow: GET`. Zero upstream invocation. |
+| `/v1/chat/completions`, `/chat/completions` | GET, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Evaluated at step 2. Header `Allow: POST, OPTIONS`. Zero upstream invocation. |
+| `/v1/models` | POST, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Evaluated at step 2. Header `Allow: GET, OPTIONS`. Zero upstream invocation. |
 | Any unrecognized route (e.g., `/v1/embeddings`, `/v1/responses`) | Any | 404 Not Found | `invalid_request_error` | Evaluated at step 1. Unsupported endpoint. Zero upstream invocation. |
 | Supported route | Supported method | 401 Unauthorized | `invalid_api_key` | Evaluated at step 3. Missing, malformed, or mismatching credentials. |
 | Supported route | Supported method | 413 Payload Too Large | `payload_too_large` | Evaluated at step 4. Body size > 10,485,760 bytes. Zero upstream invocation. |

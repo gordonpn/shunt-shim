@@ -274,7 +274,8 @@ Every request emits a single structured JSON line upon completion. To safeguard 
 |---|---|---|
 | `timestamp` | string | ISO 8601 UTC timestamp of request completion. |
 | `requestId` | string | Correlation identifier from `x-request-id` header or generated UUID. |
-| `status` | number | HTTP response status code. |
+| `status` | number | Gateway HTTP response status code. |
+| `upstreamStatus` | number (optional) | Final attempted provider HTTP status. Omitted before dispatch or when that attempt received no HTTP response. |
 | `latencyMs` | number | Total request execution duration in milliseconds. |
 | `provider` | string (optional) | Upstream provider serving the request (`groq` or `gemini`). Omitted on pre-dispatch rejections. |
 | `model` | string (optional) | Concrete upstream model name. Omitted on pre-dispatch rejections. |
@@ -296,6 +297,8 @@ Example fallback log entry:
 ```json
 {"timestamp":"2026-10-29T21:44:57.285Z","requestId":"c3a10d92-2310-4f51-b856-02e48aa12d09","status":200,"latencyMs":328,"provider":"gemini","model":"gemini-2.5-flash-lite","fallbackReason":"rate_limit_exceeded","attempts":2}
 ```
+
+Final HTTP 429 and 503 responses preserve only `Retry-After` and the six standard request/token `x-ratelimit-{limit,remaining,reset}-{requests,tokens}` headers from the final attempt. Earlier attempt headers and arbitrary upstream headers are excluded.
 
 ### Quota Diagnostics
 The MVP has no shared quota counters or circuit-breaker state to inspect. Use upstream status codes, rate-limit headers when available, and provider dashboards as the source of truth.

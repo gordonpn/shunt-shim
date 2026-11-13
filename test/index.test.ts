@@ -45,6 +45,95 @@ describe("Gateway HTTP Entrypoint", () => {
     vi.restoreAllMocks();
   });
 
+  describe("HTTP methods and browser CORS (#69)", () => {
+    for (const path of [
+      "/v1/models",
+      "/v1/chat/completions",
+      "/chat/completions",
+    ]) {
+      const models = path === "/v1/models";
+      it.each(["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])(
+        `${path} %s`,
+        async (method) => {
+          const supported = models
+            ? ["GET", "HEAD"].includes(method)
+            : method === "POST";
+          const res = await app.request(
+            path,
+            {
+              method,
+              headers: {
+                Origin: "https://client.example",
+                Authorization: "Bearer test-token-12345",
+                "Content-Type": "application/json",
+              },
+              ...(method === "POST"
+                ? {
+                    body: JSON.stringify({
+                      model: "fast",
+                      messages: [{ role: "user", content: "hello" }],
+                    }),
+                  }
+                : {}),
+            },
+            mockEnv,
+          );
+          expect(res.status).toBe(
+            method === "OPTIONS" ? 204 : supported ? 200 : 405,
+          );
+          expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+          if (!supported)
+            expect(res.headers.get("Allow")).toBe(
+              models ? "GET, OPTIONS" : "POST, OPTIONS",
+            );
+          if (method === "OPTIONS") {
+            expect(res.headers.get("Access-Control-Allow-Methods")).toContain(
+              models ? "GET" : "POST",
+            );
+            expect(
+              res.headers.get("Access-Control-Allow-Headers")?.toLowerCase(),
+            ).toContain("authorization");
+            expect(await res.text()).toBe("");
+          }
+          if (supported && !models) expect(fetch).toHaveBeenCalledTimes(1);
+          else expect(fetch).not.toHaveBeenCalled();
+        },
+      );
+    }
+    it("allows preflight without credentials but protects actual requests", async () => {
+      const preflight = await app.request("/v1/chat/completions", {
+        method: "OPTIONS",
+        headers: {
+          Origin: "https://client.example",
+          "Access-Control-Request-Method": "POST",
+          "Access-Control-Request-Headers":
+            "authorization,content-type,x-api-key,x-request-id",
+        },
+      });
+      expect(preflight.status).toBe(204);
+      for (const name of [
+        "authorization",
+        "content-type",
+        "x-api-key",
+        "x-request-id",
+      ])
+        expect(
+          preflight.headers.get("Access-Control-Allow-Headers")?.toLowerCase(),
+        ).toContain(name);
+      const denied = await app.request(
+        "/v1/chat/completions",
+        { method: "POST", headers: { Origin: "https://client.example" } },
+        mockEnv,
+      );
+      expect(denied.status).toBe(401);
+      expect(denied.headers.get("Access-Control-Allow-Origin")).toBe("*");
+      expect(fetch).not.toHaveBeenCalled();
+      expect(
+        (await app.request("/missing", { method: "OPTIONS" })).status,
+      ).toBe(404);
+    });
+  });
+
   it("responds with 200 on unauthenticated health endpoints", async () => {
     const rootRes = await app.request("/");
     expect(rootRes.status).toBe(200);
@@ -660,9 +749,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           PRIMARY_MODEL: "llama-3.3-70b-versatile",
         }),
-      ).toThrow(
-        "Disallowed PRIMARY_MODEL configuration: llama-3.3-70b-versatile",
-      );
+      ).toThrow("Disallowed PRIMARY_MODEL configuration");
 
       expect(() =>
         validateEnvironment({
@@ -671,7 +758,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           PRIMARY_MODEL: "openai/gpt-oss-120b",
         }),
-      ).toThrow("Disallowed PRIMARY_MODEL configuration: openai/gpt-oss-120b");
+      ).toThrow("Disallowed PRIMARY_MODEL configuration");
     });
 
     it("throws explicit error when FALLBACK_MODEL is disallowed", () => {
@@ -682,7 +769,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           FALLBACK_MODEL: "gemini-1.5-pro",
         }),
-      ).toThrow("Disallowed FALLBACK_MODEL configuration: gemini-1.5-pro");
+      ).toThrow("Disallowed FALLBACK_MODEL configuration");
     });
 
     it("throws explicit error when PRIMARY_PROVIDER is disallowed", () => {
@@ -693,7 +780,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           PRIMARY_PROVIDER: "anthropic" as unknown as "groq",
         }),
-      ).toThrow("Disallowed PRIMARY_PROVIDER configuration: anthropic");
+      ).toThrow("Disallowed PRIMARY_PROVIDER configuration");
     });
 
     it("accepts valid https URLs for GROQ_BASE_URL and GEMINI_BASE_URL", () => {
@@ -736,7 +823,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           GROQ_BASE_URL: "not a valid url",
         }),
-      ).toThrow("Invalid GROQ_BASE_URL configuration: not a valid url");
+      ).toThrow("Invalid GROQ_BASE_URL configuration: must be a valid URL");
 
       expect(() =>
         validateEnvironment({
@@ -745,7 +832,7 @@ describe("Gateway HTTP Entrypoint", () => {
           GEMINI_API_KEY: "gemini-key",
           GEMINI_BASE_URL: "not a valid url",
         }),
-      ).toThrow("Invalid GEMINI_BASE_URL configuration: not a valid url");
+      ).toThrow("Invalid GEMINI_BASE_URL configuration: must be a valid URL");
     });
 
     it("ensures error messages never leak secret values across validation cases", () => {
@@ -765,8 +852,7 @@ describe("Gateway HTTP Entrypoint", () => {
             GEMINI_API_KEY: "gemini-key",
             PRIMARY_MODEL: "disallowed-primary",
           },
-          expectedError:
-            "Disallowed PRIMARY_MODEL configuration: disallowed-primary",
+          expectedError: "Disallowed PRIMARY_MODEL configuration",
         },
       ];
 
