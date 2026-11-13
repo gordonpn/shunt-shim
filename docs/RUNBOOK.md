@@ -172,6 +172,8 @@ just verify-ingress-live https://shunt-shim.<subdomain>.workers.dev
 ### Maximum-body and deployment evidence
 
 ```bash
+# Set the actual URL printed by deployment before running these probes.
+export BASE_URL="https://shunt-shim.<your-subdomain>.workers.dev"
 just verify-ingress-resource "$BASE_URL"
 ```
 

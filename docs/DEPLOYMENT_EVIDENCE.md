@@ -13,6 +13,8 @@ production job was skipped is not deployment evidence. Never record tokens,
 provider keys, private prompts, or raw provider output.
 
 ```bash
+# Set the actual URL printed by deployment before running these probes.
+export BASE_URL="https://shunt-shim.<your-subdomain>.workers.dev"
 just deployments
 just verify-ingress "$BASE_URL"
 just verify-ingress-live "$BASE_URL"

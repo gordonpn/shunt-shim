@@ -292,10 +292,11 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
       expect(summary.failed).toBe(0);
       const probe = summary.results.find((r) => r.name.includes("exact 10 MB"));
       expect(probe).toMatchObject({ passed: true, status: 400 });
+      expect(probe?.message).toMatch(/request ID: [0-9a-f-]{36}/i);
       const calls = vi.mocked(fetch).mock.calls;
-      expect(calls.every(([url]) => String(url).startsWith(targetUrl))).toBe(
-        true,
-      );
+      expect(
+        calls.every(([url]) => new URL(String(url)).origin === targetUrl),
+      ).toBe(true);
       const request = calls.find(
         ([, init]) =>
           typeof init?.body === "string" && init.body.length === 10485760,

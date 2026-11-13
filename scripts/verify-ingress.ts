@@ -523,7 +523,7 @@ export async function runIngressVerification(
             const body =
               prefix.slice(0, -2) +
               "x".repeat(10 * 1024 * 1024 - prefix.length) +
-              '\"}';
+              '"}';
             const res = await fetch(`${baseUrl}/v1/chat/completions`, {
               method: "POST",
               headers: authHeaders,
@@ -541,8 +541,8 @@ export async function runIngressVerification(
               passed,
               status: res.status,
               message: passed
-                ? "Parsed exactly 10,485,760 bytes; streaming rejected before upstream dispatch"
-                : "Expected HTTP 400 unsupported_parameter for stream at the exact body limit",
+                ? `Parsed exactly 10,485,760 bytes; streaming rejected before upstream dispatch; request ID: ${res.headers.get("x-request-id") ?? "missing"}`
+                : `Expected HTTP 400 unsupported_parameter for stream at the exact body limit; request ID: ${res.headers.get("x-request-id") ?? "missing"}`,
             };
           },
           timeoutMs,
