@@ -47,6 +47,12 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
   });
 
   describe("parseArgs", () => {
+    it("parses explicit resource verification", () => {
+      expect(parseArgs(["https://gateway.test", "--resource"])).toMatchObject({
+        resource: true,
+      });
+    });
+
     it("returns 'help' when -h or --help is passed", () => {
       expect(parseArgs(["-h"])).toBe("help");
       expect(parseArgs(["--help"])).toBe("help");
@@ -274,6 +280,84 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
         passed: false,
         message: "--live requires a token. Set GATEWAY_TOKENS or pass --token.",
       });
+    });
+
+    it("verifies exact-limit JSON parsing without dispatching upstream", async () => {
+      const summary = await runIngressVerification({
+        baseUrl: targetUrl,
+        token: testToken,
+        resource: true,
+      });
+      expect(summary.total).toBe(12);
+      expect(summary.failed).toBe(0);
+      const probe = summary.results.find((r) => r.name.includes("exact 10 MB"));
+      expect(probe).toMatchObject({ passed: true, status: 400 });
+      expect(probe?.message).toMatch(/request ID: [0-9a-f-]{36}/i);
+      const calls = vi.mocked(fetch).mock.calls;
+      expect(
+        calls.every(([url]) => new URL(String(url)).origin === targetUrl),
+      ).toBe(true);
+      const request = calls.find(
+        ([, init]) =>
+          typeof init?.body === "string" && init.body.length === 10485760,
+      );
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.[1]?.body)).stream).toBe(true);
+    });
+
+    it("fails resource verification explicitly without a token", async () => {
+      const summary = await runIngressVerification({
+        baseUrl: targetUrl,
+        resource: true,
+      });
+      expect(summary.failed).toBe(1);
+      expect(summary.results.at(-1)?.message).toContain(
+        "--resource requires a token",
+      );
+    });
+
+    it("fails the resource probe if ingress rejects an in-limit body", async () => {
+      const normalFetch = vi.mocked(fetch).getMockImplementation();
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (typeof init?.body === "string" && init.body.length === 10485760) {
+          return Response.json(
+            { error: { code: "payload_too_large" } },
+            { status: 413 },
+          );
+        }
+        if (!normalFetch) throw new Error("Missing mock");
+        return normalFetch(input, init);
+      });
+      const summary = await runIngressVerification({
+        baseUrl: targetUrl,
+        token: testToken,
+        resource: true,
+      });
+      expect(summary.failed).toBe(1);
+    });
+
+    it("preserves status and request ID when the resource response is not JSON", async () => {
+      const normalFetch = vi.mocked(fetch).getMockImplementation();
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (typeof init?.body === "string" && init.body.length === 10485760) {
+          return new Response("<html>proxy failure</html>", {
+            status: 502,
+            headers: { "x-request-id": "resource-failure-123" },
+          });
+        }
+        if (!normalFetch) throw new Error("Missing mock");
+        return normalFetch(input, init);
+      });
+      const summary = await runIngressVerification({
+        baseUrl: targetUrl,
+        token: testToken,
+        resource: true,
+      });
+      expect(summary.failed).toBe(1);
+      const probe = summary.results.find((r) => r.name.includes("exact 10 MB"));
+      expect(probe).toMatchObject({ passed: false, status: 502 });
+      expect(probe?.message).toContain("request ID: resource-failure-123");
+      expect(probe?.message).not.toContain("<html>");
     });
 
     it("verifies live probe succeeds when --live is enabled", async () => {

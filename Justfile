@@ -86,6 +86,10 @@ verify-ingress url:
 verify-ingress-live url:
     node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }} --live
 
+# Verify exact-limit body parsing without consuming provider quota
+verify-ingress-resource url:
+    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }} --resource
+
 # Inspect real-time edge runtime logs
 tail:
     pnpm exec wrangler tail
