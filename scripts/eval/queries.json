@@ -1,0 +1,220 @@
+[
+  {
+    "query": "Cloudflare Workers Durable Objects transactional storage API",
+    "category": "technical_docs",
+    "expected_domains": [
+      "developers.cloudflare.com"
+    ]
+  },
+  {
+    "query": "Hono middleware request context bindings TypeScript documentation",
+    "category": "technical_docs",
+    "expected_domains": [
+      "hono.dev"
+    ]
+  },
+  {
+    "query": "TypeScript satisfies operator preserving inferred types documentation",
+    "category": "technical_docs",
+    "expected_domains": [
+      "typescriptlang.org"
+    ]
+  },
+  {
+    "query": "Node.js stream pipeline AbortSignal documentation",
+    "category": "technical_docs",
+    "expected_domains": [
+      "nodejs.org"
+    ]
+  },
+  {
+    "query": "PostgreSQL INSERT ON CONFLICT returning rows documentation",
+    "category": "technical_docs",
+    "expected_domains": [
+      "postgresql.org"
+    ]
+  },
+  {
+    "query": "React useEffect cleanup dependencies documentation",
+    "category": "technical_docs",
+    "expected_domains": [
+      "react.dev"
+    ]
+  },
+  {
+    "query": "Docker Compose healthcheck service_healthy depends_on documentation",
+    "category": "technical_docs",
+    "expected_domains": [
+      "docs.docker.com"
+    ]
+  },
+  {
+    "query": "Vitest mocking fetch vi.stubGlobal restore mocks documentation",
+    "category": "technical_docs",
+    "expected_domains": [
+      "vitest.dev"
+    ]
+  },
+  {
+    "query": "Hono TypeScript web framework GitHub repository",
+    "category": "github_discovery",
+    "expected_domains": [
+      "github.com"
+    ]
+  },
+  {
+    "query": "uv Python package manager astral GitHub repository",
+    "category": "github_discovery",
+    "expected_domains": [
+      "github.com"
+    ]
+  },
+  {
+    "query": "ripgrep recursive search tool BurntSushi GitHub repository",
+    "category": "github_discovery",
+    "expected_domains": [
+      "github.com"
+    ]
+  },
+  {
+    "query": "Biome formatter linter GitHub repository contributing guide",
+    "category": "github_discovery",
+    "expected_domains": [
+      "github.com"
+    ]
+  },
+  {
+    "query": "Cloudflare workerd runtime GitHub issues fetch AbortSignal",
+    "category": "github_discovery",
+    "expected_domains": [
+      "github.com"
+    ]
+  },
+  {
+    "query": "pnpm GitHub issues workspace protocol dependency resolution",
+    "category": "github_discovery",
+    "expected_domains": [
+      "github.com"
+    ]
+  },
+  {
+    "query": "Vite GitHub discussions monorepo linked package hot reload",
+    "category": "github_discovery",
+    "expected_domains": [
+      "github.com"
+    ]
+  },
+  {
+    "query": "TypeScript TS2304 Cannot find name process Node.js types",
+    "category": "error_troubleshooting",
+    "expected_domains": [
+      "typescriptlang.org",
+      "stackoverflow.com"
+    ]
+  },
+  {
+    "query": "TypeScript TS2322 Type undefined is not assignable to type string strictNullChecks",
+    "category": "error_troubleshooting",
+    "expected_domains": [
+      "typescriptlang.org",
+      "stackoverflow.com"
+    ]
+  },
+  {
+    "query": "Node.js ERR_REQUIRE_ESM require ES module dynamic import fix",
+    "category": "error_troubleshooting",
+    "expected_domains": [
+      "nodejs.org",
+      "stackoverflow.com"
+    ]
+  },
+  {
+    "query": "Docker permission denied while trying to connect to Docker daemon socket Linux",
+    "category": "error_troubleshooting",
+    "expected_domains": [
+      "docs.docker.com"
+    ]
+  },
+  {
+    "query": "PostgreSQL SQLSTATE 23505 duplicate key value violates unique constraint",
+    "category": "error_troubleshooting",
+    "expected_domains": [
+      "postgresql.org",
+      "stackoverflow.com"
+    ]
+  },
+  {
+    "query": "Cloudflare Workers error 1101 Worker threw exception troubleshooting",
+    "category": "error_troubleshooting",
+    "expected_domains": [
+      "developers.cloudflare.com"
+    ]
+  },
+  {
+    "query": "Git fatal refusing to merge unrelated histories explanation",
+    "category": "error_troubleshooting",
+    "expected_domains": [
+      "git-scm.com",
+      "stackoverflow.com"
+    ]
+  },
+  {
+    "query": "Python ModuleNotFoundError installed package wrong virtual environment pip",
+    "category": "error_troubleshooting",
+    "expected_domains": [
+      "docs.python.org",
+      "packaging.python.org"
+    ]
+  },
+  {
+    "query": "TypeScript 5.9 release notes import defer changes",
+    "category": "recent_releases",
+    "expected_domains": [
+      "typescriptlang.org",
+      "devblogs.microsoft.com"
+    ]
+  },
+  {
+    "query": "Node.js 24 release announcement V8 changes LTS",
+    "category": "recent_releases",
+    "expected_domains": [
+      "nodejs.org"
+    ]
+  },
+  {
+    "query": "Python 3.14 whats new release notes free threading",
+    "category": "recent_releases",
+    "expected_domains": [
+      "docs.python.org",
+      "python.org"
+    ]
+  },
+  {
+    "query": "PostgreSQL 18 release notes new features",
+    "category": "recent_releases",
+    "expected_domains": [
+      "postgresql.org"
+    ]
+  },
+  {
+    "query": "React 19.2 release notes Activity useEffectEvent",
+    "category": "recent_releases",
+    "expected_domains": [
+      "react.dev"
+    ]
+  },
+  {
+    "query": "Go 1.25 release notes runtime changes",
+    "category": "recent_releases",
+    "expected_domains": [
+      "go.dev"
+    ]
+  },
+  {
+    "query": "Vite 7 release announcement Node.js version requirements",
+    "category": "recent_releases",
+    "expected_domains": [
+      "vite.dev"
+    ]
+  }
+]
