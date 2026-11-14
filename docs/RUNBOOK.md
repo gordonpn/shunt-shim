@@ -112,7 +112,13 @@ Deploy the bundle to Cloudflare Workers:
 ```bash
 just deploy
 ```
-The deployed worker URL will be displayed in the terminal output (for example, `https://shunt-shim.<your-subdomain>.workers.dev`).
+The deployed worker URLs will be displayed in the terminal output (for example, `https://shunt-shim.<your-subdomain>.workers.dev` and `shunt-shim.gordon-pn.com`).
+
+#### Custom Domain Prerequisites (`shunt-shim.gordon-pn.com`)
+`wrangler.jsonc` binds `shunt-shim.gordon-pn.com` using Cloudflare Workers Custom Domains (`custom_domain: true`), coexisting with `workers.dev` and `preview_urls: true`:
+- The `gordon-pn.com` zone must be active in the target Cloudflare account.
+- No conflicting DNS record (`A`, `AAAA`, or `CNAME`) may exist for `shunt-shim.gordon-pn.com`.
+- On `just deploy`, Cloudflare automatically creates the managed DNS record and provisions the edge TLS certificate. Initial certificate issuance can take up to a few minutes.
 
 ### Step 4: Inspect Deployments and Rollback
 List deployment history with versions, timestamps, and deployment IDs:
@@ -148,7 +154,7 @@ Preview URL lifecycle:
 The GitHub Actions deployment workflow (`.github/workflows/deploy.yml`) automates both preview and production releases:
 - Pull requests from the same repository upload a version with `--preview-alias pr-<number>` and run `just verify-ingress`.
 - Merges to `main` run quality checks, execute `just deploy`, verify ingress, and automatically trigger `just rollback` if post-deploy verification fails.
-- Required repository secrets: `CLOUDFLARE_API_TOKEN` (permissions: `Workers Scripts: Edit`, `Account Settings: Read`) and `CLOUDFLARE_ACCOUNT_ID`. Set `GATEWAY_TOKENS` to enable authenticated conformance checks.
+- Required repository secrets: `CLOUDFLARE_API_TOKEN` (Account: `Workers Scripts: Edit`, `Account Settings: Read`; Zone `gordon-pn.com`: `Zone: Read`, `Workers Routes: Edit`, `DNS: Edit`) and `CLOUDFLARE_ACCOUNT_ID`. Set `GATEWAY_TOKENS` to enable authenticated conformance checks.
 
 ## 4. Verification and Smoke Testing
 
@@ -158,8 +164,9 @@ Run the automated verification suite against local or deployed ingress:
 # Verify local emulator
 just verify-ingress http://127.0.0.1:8787
 
-# Verify deployed worker
+# Verify deployed worker (workers.dev and custom domain)
 just verify-ingress https://shunt-shim.<subdomain>.workers.dev
+just verify-ingress https://shunt-shim.gordon-pn.com
 ```
 
 The recipes load `GATEWAY_TOKENS` from `.dev.vars`; do not pass it as a command-line argument.
@@ -167,6 +174,7 @@ The recipes load `GATEWAY_TOKENS` from `.dev.vars`; do not pass it as a command-
 To execute a live end-to-end chat completion against the primary upstream model through the ingress route:
 ```bash
 just verify-ingress-live https://shunt-shim.<subdomain>.workers.dev
+just verify-ingress-live https://shunt-shim.gordon-pn.com
 ```
 
 ### Automated Ingress Probes Executed
