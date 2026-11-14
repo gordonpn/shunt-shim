@@ -25,7 +25,7 @@ This document records non-obvious engineering and implementation decisions made 
 
 ## 2026-11-10: Synchronize allowlisted GitHub Actions secrets while quarantining provider keys
 
-- Decision: Provide `just sync-github-secrets` to push only `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `GATEWAY_TOKENS` from `.dev.vars` to GitHub Actions via `gh secret set` over stdin, keeping `GROQ_API_KEY` and `GEMINI_API_KEY` restricted to Cloudflare Worker runtime secrets.
+- Decision: Provide `just sync-github-secrets` to push only `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `GATEWAY_TOKENS` from the inherited environment, with unset variables loaded from `.dev.vars` by Just, to GitHub Actions via `gh secret set` over stdin. Already-exported variables take precedence over `.dev.vars`. Keep `GROQ_API_KEY` and `GEMINI_API_KEY` restricted to Cloudflare Worker runtime secrets.
 - Rationale: Eliminate manual copy-paste into the GitHub web UI, prevent plaintext secret exposure in process arguments or console output, and quarantine upstream provider keys from CI.
 - Rejected alternatives: Manual copying into the GitHub web UI.
 - Source: [#88 feat: synchronize allowlisted GitHub Actions secrets (#85)](https://github.com/gordonpn/shunt-shim/pull/88), [#85 Add secret synchronization recipe for GitHub and Cloudflare credentials](https://github.com/gordonpn/shunt-shim/issues/85)
