@@ -115,7 +115,7 @@ just deploy
 The deployed worker URLs will be displayed in the terminal output (for example, `https://shunt-shim.<your-subdomain>.workers.dev` and `shunt-shim.gordon-pn.com`).
 
 #### Custom Domain Prerequisites (`shunt-shim.gordon-pn.com`)
-`wrangler.jsonc` binds `shunt-shim.gordon-pn.com` using Cloudflare Workers Custom Domains (`custom_domain: true`), coexisting with `workers.dev` and `preview_urls: true`:
+`wrangler.jsonc` binds `shunt-shim.gordon-pn.com` using Cloudflare Workers Custom Domains (`custom_domain: true`), coexisting with explicit `workers_dev: true` and `preview_urls: true`:
 - The `gordon-pn.com` zone must be active in the target Cloudflare account.
 - No conflicting DNS record (`A`, `AAAA`, or `CNAME`) may exist for `shunt-shim.gordon-pn.com`.
 - On `just deploy`, Cloudflare automatically creates the managed DNS record and provisions the edge TLS certificate. Initial certificate issuance can take up to a few minutes.
@@ -143,6 +143,8 @@ To deploy an isolated Worker version with a preview alias locally:
 ```bash
 just deploy-preview pr-80
 ```
+Use a dedicated non-production Cloudflare account with a pre-existing `shunt-shim` Worker for PR previews. Bootstrap it from trusted code with a preview-only config without production domain routes before enabling preview credentials. Never give PR-controlled code production provisioning credentials.
+
 This uploads a Worker Version with `preview_urls: true` and generates a deterministic endpoint (for example, `https://pr-80-shunt-shim.<subdomain>.workers.dev`) without shifting production traffic.
 
 Preview URL lifecycle:
@@ -152,9 +154,9 @@ Preview URL lifecycle:
 
 #### Continuous Delivery Pipeline
 The GitHub Actions deployment workflow (`.github/workflows/deploy.yml`) automates both preview and production releases:
-- Pull requests from the same repository upload a version with `--preview-alias pr-<number>` and run `just verify-ingress`.
-- Merges to `main` run quality checks, execute `just deploy`, verify ingress, and automatically trigger `just rollback` if post-deploy verification fails.
-- Required repository secrets: `CLOUDFLARE_API_TOKEN` (Account: `Workers Scripts: Edit`, `Account Settings: Read`; Zone `gordon-pn.com`: `Zone: Read`, `Workers Routes: Edit`, `DNS: Edit`) and `CLOUDFLARE_ACCOUNT_ID`. Set `GATEWAY_TOKENS` to enable authenticated conformance checks.
+- Pull requests from the same repository with separate preview credentials upload a version with `--preview-alias pr-<number>` and run `just verify-ingress`.
+- Merges to `main` run quality checks, execute `just deploy`, verify both `workers.dev` and the custom domain, and trigger `just rollback` if either fails. Both endpoints are checked after rollback; DNS, routing, or certificate failures may need operator intervention because a Worker-version rollback does not necessarily restore them.
+- Production credentials belong in the `production` GitHub environment restricted to `main`: `CLOUDFLARE_PRODUCTION_API_TOKEN`, `CLOUDFLARE_PRODUCTION_ACCOUNT_ID`, and `PRODUCTION_GATEWAY_TOKENS`. Preview jobs use only `CLOUDFLARE_PREVIEW_API_TOKEN`, `CLOUDFLARE_PREVIEW_ACCOUNT_ID`, and `PREVIEW_GATEWAY_TOKENS` for a separate non-production account. See [credential permissions and migration](AUTOMATION.md#separate-preview-and-production-credentials). Rotate and remove legacy production repository secrets; changing workflow references alone does not revoke them.
 
 ## 4. Verification and Smoke Testing
 
