@@ -81,12 +81,15 @@ just generate-token
 
 To rotate a token without downtime:
 1. Generate a replacement secret: `just generate-token`.
-2. Add the new secret alongside the active token in `GATEWAY_TOKENS` (`"<active-token>,<new-token>"`), or update only the token slot being rotated, and push it to the Worker:
+2. Add the new secret first alongside every still-active token in `GATEWAY_TOKENS` (`"<new-token>,<active-token>"`) so existing clients keep authenticating during cutover, and push it to the Worker:
    ```bash
    pnpm exec wrangler secret put GATEWAY_TOKENS
    ```
    Or update `.dev.vars` and run `just provision-secrets`.
-3. Update downstream client configurations to use the new secret and verify with `just verify-ingress https://shunt-shim.<subdomain>.workers.dev --token "<new-token>"`.
+3. Update downstream client configurations to use the new secret and verify via `.dev.vars` (`GATEWAY_TOKENS` first entry `<new-token>`) without passing secrets as CLI arguments:
+   ```bash
+   just verify-ingress https://shunt-shim.<subdomain>.workers.dev
+   ```
 4. Remove the retired token from `GATEWAY_TOKENS` and re-run `just provision-secrets` (or `wrangler secret put GATEWAY_TOKENS`) so the old secret immediately returns HTTP 401.
 
 ## 3. Production Deployment to Cloudflare Workers
