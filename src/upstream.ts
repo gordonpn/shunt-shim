@@ -92,6 +92,17 @@ function getRetryHeaders(response: Response): Record<string, string> {
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
 const DEFAULT_TOTAL_DEADLINE_MS = 60000;
 
+// Cloudflare Workers resolves origin/DNS failures to HTTP 530 instead of rejecting fetch().
+const ELIGIBLE_PRIMARY_FAILURE_REASONS = new Map<number, string>([
+  [429, "rate_limit_exceeded"],
+  [503, "service_unavailable"],
+  [530, "origin_dns_error"],
+]);
+
+function getPrimaryFailureReason(status: number): string | undefined {
+  return ELIGIBLE_PRIMARY_FAILURE_REASONS.get(status);
+}
+
 interface AttemptSignal {
   signal: AbortSignal;
   cleanup: () => void;
@@ -636,14 +647,12 @@ export async function forwardChatCompletion(
       };
     }
 
-    if (primaryResponse) {
-      if (primaryResponse.status === 429) {
-        isPrimaryEligibleFailure = true;
-        fallbackReason = "rate_limit_exceeded";
-      } else if (primaryResponse.status === 503) {
-        isPrimaryEligibleFailure = true;
-        fallbackReason = "service_unavailable";
-      }
+    const primaryEligibility = primaryResponse
+      ? getPrimaryFailureReason(primaryResponse.status)
+      : undefined;
+    if (primaryEligibility !== undefined) {
+      isPrimaryEligibleFailure = true;
+      fallbackReason = primaryEligibility;
     }
 
     if (!isPrimaryEligibleFailure) {
