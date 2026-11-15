@@ -60,9 +60,20 @@ if ! gh api -X PUT 'repos/{owner}/{repo}/environments/production' \
   exit 1
 fi
 
-main_policy_count=$(gh api 'repos/{owner}/{repo}/environments/production/deployment-branch-policies' \
-  --jq '[.branch_policies[] | select(.name == "main" and .type == "branch")] | length')
-if [[ "$main_policy_count" == '0' ]]; then
+policies=$(gh api 'repos/{owner}/{repo}/environments/production/deployment-branch-policies' \
+  --jq '.branch_policies[] | "\(.id)\t\(.name)\t\(.type)"')
+has_main=false
+while IFS=$'\t' read -r policy_id policy_name policy_type; do
+  [[ -n "$policy_id" ]] || continue
+  if [[ "$policy_name" == 'main' && "$policy_type" == 'branch' ]]; then
+    has_main=true
+  elif ! gh api -X DELETE "repos/{owner}/{repo}/environments/production/deployment-branch-policies/${policy_id}" >/dev/null 2>&1; then
+    printf 'Failed to remove non-main deployment policy %s (%s) from production environment.\n' "$policy_name" "$policy_type" >&2
+    exit 1
+  fi
+done <<< "$policies"
+
+if [[ "$has_main" != true ]]; then
   if ! gh api -X POST 'repos/{owner}/{repo}/environments/production/deployment-branch-policies' \
     -f name=main -f type=branch >/dev/null 2>&1; then
     echo 'Failed to add main deployment branch policy to production environment.' >&2

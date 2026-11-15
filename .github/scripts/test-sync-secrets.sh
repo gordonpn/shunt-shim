@@ -25,7 +25,15 @@ if [[ "$1" == 'api' ]]; then
     exit "${MOCK_ENV_FAIL:-0}"
   fi
   if [[ "$2" == 'repos/{owner}/{repo}/environments/production/deployment-branch-policies' ]]; then
-    printf '%s\n' "${MOCK_MAIN_POLICY_COUNT:-0}"
+    if [[ -n "${MOCK_POLICIES:-}" ]]; then
+      printf '%b\n' "$MOCK_POLICIES"
+    elif [[ "${MOCK_MAIN_POLICY_COUNT:-0}" != '0' ]]; then
+      printf '100\tmain\tbranch\n'
+    fi
+    exit 0
+  fi
+  if [[ "$2 $3" == '-X DELETE' && "$4" == repos/\{owner\}/\{repo\}/environments/production/deployment-branch-policies/* ]]; then
+    printf '%s\n' "${4##*/}" >> "$MOCK_ROOT/policy_deletes"
     exit 0
   fi
   if [[ "$2 $3" == '-X POST' && "$4" == 'repos/{owner}/{repo}/environments/production/deployment-branch-policies' ]]; then
@@ -84,6 +92,7 @@ run() {
   : > "$TMP_DIR/calls"
   : > "$TMP_DIR/writes"
   : > "$TMP_DIR/deletes"
+  : > "$TMP_DIR/policy_deletes"
   status=0
   output=$(env -i PATH="$TMP_DIR/bin" MOCK_ROOT="$TMP_DIR" "$@" \
     "$JUST" --justfile "$TMP_DIR/Justfile" --working-directory "$TMP_DIR" \
@@ -139,9 +148,17 @@ grep -qx 'secret set --env production CLOUDFLARE_PRODUCTION_API_TOKEN' "$TMP_DIR
 run MOCK_MAIN_POLICY_COUNT=1 MOCK_REPO_SECRETS='DEEPSEEK_API_KEY'
 [[ "$status" == 0 ]] || fail "Idempotent rerun failed: $output"
 [[ ! -s "$TMP_DIR/deletes" ]] || fail 'Attempted to delete unrelated repository secret'
+[[ ! -s "$TMP_DIR/policy_deletes" ]] || fail 'Deleted main branch policy on idempotent rerun'
 if grep -q 'deployment-branch-policies -f name=main' "$TMP_DIR/calls"; then
   fail 'Recreated existing main branch policy'
 fi
+
+# Non-main branch and tag policies are removed before writing production secrets.
+run MOCK_MAIN_POLICY_COUNT=0 MOCK_POLICIES='101\tdev\tbranch\n102\tmain\ttag'
+[[ "$status" == 0 ]] || fail "Policy pruning failed: $output"
+printf '%s\n' 101 102 > "$TMP_DIR/expected-policy-deletes"
+cmp -s "$TMP_DIR/policy_deletes" "$TMP_DIR/expected-policy-deletes" || fail 'Non-main deployment policies were not removed'
+grep -qx 'api -X POST repos/{owner}/{repo}/environments/production/deployment-branch-policies -f name=main -f type=branch' "$TMP_DIR/calls" || fail 'Expected main branch policy added after pruning non-main policies'
 
 # Primary production variables override fallback dotenv names.
 printf '%s' 'dummy-prod-override-token' > "$TMP_DIR/expected/CLOUDFLARE_PRODUCTION_API_TOKEN"
