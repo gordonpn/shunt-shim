@@ -129,43 +129,48 @@ restricted environment. Merely renaming workflow references does not revoke
 repository secrets accessible to PR workflows. No live deployment or secret
 migration is claimed by this PR.
 
-### Legacy repository secret synchronization
+### Production environment and secret synchronization
 
-The existing `just sync-github-secrets` helper writes legacy repository secrets;
-**do not use it with production credentials**. It does not configure the new
-production environment or preview secrets. Provision those through GitHub
-environment/repository settings as described above.
-
-For the legacy helper, install GitHub CLI (`gh`) and authenticate with `gh auth login` using an account
-with permission to manage this repository's Actions secrets. In the repository
-root, copy `.env.example` to `.dev.vars` if needed, then set
-`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `GATEWAY_TOKENS` there.
+Install GitHub CLI (`gh`) and authenticate with `gh auth login` using an account
+with permission to manage this repository's Actions environments and secrets. In
+the repository root, copy `.env.example` to `.dev.vars` if needed, then set
+`CLOUDFLARE_PRODUCTION_API_TOKEN`, `CLOUDFLARE_PRODUCTION_ACCOUNT_ID`, and
+`PRODUCTION_GATEWAY_TOKENS` (or `CLOUDFLARE_API_TOKEN`,
+`CLOUDFLARE_ACCOUNT_ID`, and `GATEWAY_TOKENS` as local `.dev.vars` fallbacks).
 Keep this ignored file local; do not paste credential values into commands.
 
 ```bash
 just sync-github-secrets
-gh secret list
+gh secret list --env production
 ```
 
 Just parses `.dev.vars` as dotenv data; it is not sourced as shell code. Existing
-environment variables take precedence. The command requires the file and all
+environment variables take precedence. The command requires `.dev.vars` and all
 three nonempty values, even though deployment verification can otherwise omit
 the gateway token. It validates CLI authentication and all required values
-before writing any secrets to the repository selected by `gh` from this checkout.
-Check the destination with `gh repo view` before running it.
+before updating GitHub. Check the destination with `gh repo view` before
+running it.
 
-Only those three named secrets are updated, individually through stdin; values
+The script idempotently ensures the `production` GitHub environment enforces a
+`main`-only custom deployment branch policy, writes
+`CLOUDFLARE_PRODUCTION_API_TOKEN`, `CLOUDFLARE_PRODUCTION_ACCOUNT_ID`, and
+`PRODUCTION_GATEWAY_TOKENS` into `--env production` individually through stdin,
+and removes any legacy repository-level `CLOUDFLARE_API_TOKEN`,
+`CLOUDFLARE_ACCOUNT_ID`, and `GATEWAY_TOKENS` secrets if still present. Values
 never appear in CLI arguments or command output. `GROQ_API_KEY` and
 `GEMINI_API_KEY` are removed from the CLI's environment and never synchronized;
-provision them only on the Worker with `just provision-secrets`. Other existing
-repository secrets are left untouched. If a write fails, the command stops and
-identifies the secret by name; earlier writes may already have succeeded. Fix
-access and rerun to converge. `gh secret list` verifies names and update times
+provision them only on the Worker with `just provision-secrets`. Preview
+secrets and unrelated repository secrets such as `DEEPSEEK_API_KEY` are left
+untouched. If a write fails, the command stops and identifies the secret by
+name; earlier writes may already have succeeded. Fix access and rerun to
+converge. `gh secret list --env production` verifies names and update times
 without revealing values.
 
 The mock harness `just test-sync-secrets` exercises missing CLI/authentication,
-missing file/values, stdin-only writes, the allowlist, redaction, and partial
-failure. It also runs in `just check-workflows` without credentials or network.
+missing file/values, explicit empty production overrides, environment policy
+creation and idempotency, `--env production` stdin-only writes, legacy secret
+pruning, redaction, and partial failure. It also runs in `just check-workflows`
+without credentials or network.
 
 ### Pull request preview deployments
 

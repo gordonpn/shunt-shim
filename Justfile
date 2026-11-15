@@ -54,7 +54,7 @@ provision-secrets: check-secrets
 deploy:
     pnpm exec wrangler deploy
 
-# Synchronize only deployment and gateway credentials to GitHub repository secrets
+# Synchronize production GitHub environment policy and secrets
 sync-github-secrets:
     @bash .github/scripts/sync-secrets.sh
 
