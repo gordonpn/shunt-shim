@@ -50,8 +50,9 @@ Neither coverage nor CodeQL currently validates gateway code.
 
 ## Review actions
 
-DeepSeek Review and PR-Agent run when a human marks a same-repository PR ready
-for review. Both prefer the `REVIEW_GATEWAY_TOKEN` repository secret to route
+DeepSeek Review and PR-Agent run when a human opens a non-draft
+same-repository PR or marks a draft PR ready for review (draft PRs skip on open).
+Both prefer the `REVIEW_GATEWAY_TOKEN` repository secret to route
 reviews through `https://shunt-shim.gordon-pn.com/v1` with model alias `fast`.
 When `REVIEW_GATEWAY_TOKEN` is absent, both fall back to direct DeepSeek access
 using `DEEPSEEK_API_KEY`; when both secrets are absent, their review steps
