@@ -115,8 +115,12 @@ test-secrets:
 test-deploy-scripts:
     bash .github/scripts/test-deploy-scripts.sh
 
+# Verify DeepSeek prompt writer behavior against edge cases
+test-deepseek-review-prompt:
+    bash .github/scripts/test-deepseek-review-prompt.sh
+
 # Validate repository automation without application code or secrets
-check-workflows: lint-workflows test-secrets test-deploy-scripts test-sync-secrets
+check-workflows: lint-workflows test-secrets test-deploy-scripts test-deepseek-review-prompt test-sync-secrets
     sed -n '/"compatibility_flags"[[:space:]]*:[[:space:]]*\[/,/\]/p' wrangler.jsonc | grep -Eq '^[[:space:]]*"enable_request_signal"'
     shellcheck .github/scripts/*.sh
     git diff --check $(git hash-object -t tree /dev/null)
