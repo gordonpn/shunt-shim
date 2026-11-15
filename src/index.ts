@@ -1,5 +1,9 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
-import { constantTimeTokenEqual } from "./auth.js";
+import {
+  constantTimeTokenEqual,
+  matchesAnyGatewayToken,
+  parseGatewayTokens,
+} from "./auth.js";
 import { type DiagnosticRecord, emitDiagnostic } from "./diagnostics.js";
 import { createErrorResponse } from "./errors.js";
 import {
@@ -76,8 +80,7 @@ export const ALLOWED_FALLBACK_MODELS = ["gemini-2.5-flash-lite"] as const;
  * @throws Error if any required secret is missing or if configured models are not allowed.
  */
 export function validateEnvironment(env: GatewayEnv): void {
-  const gatewayTokens = env.GATEWAY_TOKENS?.trim();
-  if (!gatewayTokens) {
+  if (parseGatewayTokens(env.GATEWAY_TOKENS).length === 0) {
     throw new Error("Missing required environment secret: GATEWAY_TOKENS");
   }
 
@@ -158,7 +161,7 @@ export type GatewayMiddleware = MiddlewareHandler<{
 }>;
 
 export const authMiddleware: GatewayMiddleware = async (c, next) => {
-  const configuredToken = c.env?.GATEWAY_TOKENS?.trim();
+  const configuredTokens = parseGatewayTokens(c.env?.GATEWAY_TOKENS);
   const authHeader = c.req.header("Authorization");
   const apiKeyHeader = c.req.header("x-api-key");
 
@@ -209,11 +212,7 @@ export const authMiddleware: GatewayMiddleware = async (c, next) => {
   }
 
   const token = bearerToken ?? trimmedApiKey;
-  if (
-    !token ||
-    !configuredToken ||
-    !(await constantTimeTokenEqual(token, configuredToken))
-  ) {
+  if (!token || !(await matchesAnyGatewayToken(token, configuredTokens))) {
     return c.json(
       createErrorResponse(
         "Incorrect or missing API key provided",

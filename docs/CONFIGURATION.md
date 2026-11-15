@@ -4,11 +4,11 @@ This document describes configuration schemas, environment variables, edge secre
 
 ## MVP Configuration Constraints
 
-The [client settings and canonical contract](COMPATIBILITY.md) govern the runtime. Configure one random gateway secret, one `fast` alias, and the default Groq-primary and Gemini-fallback routing with verified model allowlists.
+The [client settings and canonical contract](COMPATIBILITY.md) govern the runtime. Configure one or more random gateway secrets, one `fast` alias, and the default Groq-primary and Gemini-fallback routing with verified model allowlists.
 
 By default, the gateway routes primary traffic to Groq (`qwen/qwen3.8-27b`) and falls back to Google AI Studio (`gemini-2.5-flash-lite`). The runtime accepts optional overrides: `PRIMARY_PROVIDER` (switching primary between `groq` and `gemini`), `GROQ_BASE_URL` (overriding Groq API endpoint), and `GEMINI_BASE_URL` (overriding Google AI Studio OpenAI endpoint).
 
-The `GATEWAY_TOKENS` secret contains only that one secret for the MVP; its plural name does not imply multi-tenant support. Direct provider model names are rejected with HTTP 404 `model_not_found`. Accept either Bearer or `x-api-key` against the same secret and reject conflicting headers. Provider keys are independent and never sent to clients.
+`GATEWAY_TOKENS` accepts a single random secret or a comma-separated list of independent bearer secrets (trimmed and deduplicated at evaluation time) so callers such as production verification and PR review workflows can rotate tokens independently without multi-tenant catalogs or per-token quotas. Direct provider model names are rejected with HTTP 404 `model_not_found`. Accept either Bearer or `x-api-key` matching any configured secret, and reject conflicting dual headers on the same request. Provider keys are independent and never sent to clients.
 
 The total request deadline covers both attempts, fits client timeouts, and remains below ingress timeouts. No database, KV namespace, multi-tenant token catalog, context router, or paid fallback is enabled by the MVP configuration.
 
@@ -20,7 +20,7 @@ Upstream API keys and edge runtime configurations are managed via Cloudflare Wor
 | :--- | :--- | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | Secret | API key for Google AI Studio | Yes | `AIzaSy...` |
 | `GROQ_API_KEY` | Secret | API key for Groq Cloud | Yes | `gsk_...` |
-| `GATEWAY_TOKENS` | Secret | Gateway authentication secret (single secret for MVP) | Yes | `<one-random-gateway-secret>` |
+| `GATEWAY_TOKENS` | Secret | Gateway authentication secret(s), comma-separated for overlapping rotation or per-client revocation | Yes | `<token-1>,<token-2>` |
 | `GATEWAY_ENV` | Variable | Runtime environment identifier | No | `production` (default: `development`) |
 | `PORT` | Variable | Local development server port | No | `8787` (default: `8787`) |
 | `GROQ_BASE_URL` | Variable | Groq API base URL override | No | `https://api.groq.com/openai/v1` |
@@ -124,8 +124,8 @@ If `stream_options` is supplied in the request body, the gateway returns HTTP 40
 
 Client applications must configure non-streaming completions (`stream: false` or omitted).
 
-## 6. Deferred Multi-Tenant Tokens and Accounting
+## 6. Deferred Multi-Tenant Catalogs and Accounting
 
-The MVP accepts only one random bearer-token secret configured via `GATEWAY_TOKENS`. Multi-tenant token catalogs (`sk-proj-*`), priority tiers, context-based model switching, and shared usage counters are deferred beyond the MVP.
+`GATEWAY_TOKENS` accepts comma-separated static bearer secrets for independent client revocation and zero-downtime rotation without privilege tiers. Multi-tenant token catalogs (`sk-proj-*`), priority tiers, context-based model switching, and shared usage counters remain deferred beyond the MVP.
 
 No KV namespace or database is provisioned. Upstream HTTP status codes (HTTP 429, HTTP 503) and connection timeouts drive bounded fallback directly.

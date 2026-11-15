@@ -110,14 +110,19 @@ describe("Deployment and Ingress Verification (Task #38)", () => {
       });
     });
 
-    it("falls back to process.env.GATEWAY_TOKENS when token is not provided", () => {
+    it("falls back to the first non-empty token in process.env.GATEWAY_TOKENS", () => {
       const originalEnv = process.env.GATEWAY_TOKENS;
-      process.env.GATEWAY_TOKENS = "env-token-123";
+      process.env.GATEWAY_TOKENS = " , env-token-123 , env-token-456 ";
       try {
         const result = parseArgs(["http://localhost:8787"]);
         expect(result).toEqual({
           baseUrl: "http://localhost:8787",
           token: "env-token-123",
+        });
+
+        process.env.GATEWAY_TOKENS = " , ";
+        expect(parseArgs(["http://localhost:8787"])).toEqual({
+          baseUrl: "http://localhost:8787",
         });
       } finally {
         if (originalEnv === undefined) {

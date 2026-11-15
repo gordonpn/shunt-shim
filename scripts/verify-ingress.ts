@@ -600,7 +600,9 @@ export function parseArgs(
   argv: string[],
 ): IngressVerifyOptions | "help" | "invalid" {
   let baseUrl: string | undefined;
-  let token = process.env.GATEWAY_TOKENS?.trim() || undefined;
+  let token = process.env.GATEWAY_TOKENS?.split(",")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0);
   let live = false;
   let timeoutMs: number | undefined;
 
