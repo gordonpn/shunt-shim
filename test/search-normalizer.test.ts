@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  type RawProviderResultInput,
   normalizeSearchResults,
+  type RawProviderResultInput,
 } from "../src/search/normalizer.js";
 
 describe("normalizeSearchResults", () => {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  TRACKING_QUERY_PARAMS,
   deduplicateResults,
   normalizeUrl,
+  TRACKING_QUERY_PARAMS,
 } from "../src/search/url.js";
 
 describe("normalizeUrl", () => {
