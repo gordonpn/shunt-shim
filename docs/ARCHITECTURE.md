@@ -133,6 +133,6 @@ By default, Groq serves as the primary provider and Google AI Studio serves as t
 The following proposals are deferred beyond the MVP:
 - **Streaming Responses (SSE):** Incremental SSE relay is deferred to post-MVP. Requests specifying `stream: true` return HTTP 400.
 - **Additional Aliases:** `deep` and `reasoning` virtual aliases are deferred.
-- **Third-Party Providers:** OpenRouter, Cloudflare Workers AI, and Vercel AI Gateway are deferred.
+- **Third-Party Providers & Paid Last-Resort Fallback:** OpenRouter, Cloudflare Workers AI, Vercel AI Gateway, configurable multi-provider `FALLBACK_ORDER`, and optional `DEEPSEEK_API_KEY` reserved strictly as a last-resort paid fallback after free-tier providers fail are deferred beyond the MVP.
 - **Multi-Tenant Catalogs & Priority Tiers:** No multi-tenant token IDs (`sk-proj-*`) or background priority degradation are implemented.
 - **Quota Storage:** No Cloudflare KV namespaces, Durable Objects, or external databases are used.
