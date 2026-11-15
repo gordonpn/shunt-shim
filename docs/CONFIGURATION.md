@@ -63,6 +63,14 @@ The implemented Worker deployment configuration:
   "compatibility_flags": [
     "enable_request_signal"
   ],
+  "preview_urls": true,
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "shunt-shim.gordon-pn.com",
+      "custom_domain": true
+    }
+  ],
   "observability": {
     "enabled": true
   }
