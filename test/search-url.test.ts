@@ -26,7 +26,7 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl(rawUrl)).toBe("https://example.com/articles/search");
   });
 
-  it("preserves functional query parameters (?q=, ?page=, ?id=) and sorts them deterministically", () => {
+  it("preserves functional query parameters (?q=, ?page=, ?id=) and sorts parameter names stably", () => {
     const first =
       "https://example.com/search/?page=2&q=cloudflare+workers&id=42&utm_source=google&fbclid=track1";
     const second =
@@ -41,11 +41,27 @@ describe("normalizeUrl", () => {
     expect(normalizedSecond).toBe(normalizedFirst);
   });
 
+  it("sorts parameter names stably while preserving the original order of values for repeated parameters", () => {
+    expect(
+      normalizeUrl("https://example.com/search?q=zebra&q=apple&utm_source=x"),
+    ).toBe("https://example.com/search?q=zebra&q=apple");
+
+    expect(
+      normalizeUrl(
+        "https://example.com/search?z=2&q=zebra&a=1&q=apple&UTM_MEDIUM=email&Ref=nav",
+      ),
+    ).toBe("https://example.com/search?a=1&q=zebra&q=apple&z=2");
+  });
+
   it("normalizes hostname casing, strips hash fragments, and removes trailing slashes on non-root paths", () => {
     expect(
       normalizeUrl("HTTPS://DOCS.Example.COM/guide/intro///#section-2"),
     ).toBe("https://docs.example.com/guide/intro");
+    expect(normalizeUrl("http://Example.COM:8080/api/v1/")).toBe(
+      "http://example.com:8080/api/v1",
+    );
     expect(normalizeUrl("https://example.com/")).toBe("https://example.com/");
+    expect(normalizeUrl("https://example.com///")).toBe("https://example.com/");
     expect(normalizeUrl("https://example.com")).toBe("https://example.com/");
   });
 
@@ -129,7 +145,7 @@ describe("deduplicateResults", () => {
     ]);
   });
 
-  it("replaces a null-scored entry when a later duplicate has a numeric score", () => {
+  it("replaces a null-scored or non-finite-scored entry when a later duplicate has a finite score", () => {
     const items = [
       {
         title: "Unscored entry",
@@ -141,6 +157,16 @@ describe("deduplicateResults", () => {
         url: "https://example.com/item/?q=rust&utm_campaign=dev",
         score: 0.65,
       },
+      {
+        title: "NaN scored entry",
+        url: "https://example.com/other",
+        score: Number.NaN,
+      },
+      {
+        title: "Finite scored duplicate",
+        url: "https://example.com/other/?ref=blog",
+        score: 0.5,
+      },
     ];
 
     const result = deduplicateResults(items);
@@ -149,6 +175,40 @@ describe("deduplicateResults", () => {
         title: "Scored duplicate",
         url: "https://example.com/item?q=rust",
         score: 0.65,
+      },
+      {
+        title: "Finite scored duplicate",
+        url: "https://example.com/other",
+        score: 0.5,
+      },
+    ]);
+  });
+
+  it("does not collapse distinct repeated-parameter URLs", () => {
+    const items = [
+      {
+        title: "Zebra then Apple",
+        url: "https://example.com/search?q=zebra&q=apple&utm_source=a",
+        score: 0.8,
+      },
+      {
+        title: "Apple then Zebra",
+        url: "https://example.com/search?q=apple&q=zebra&utm_source=b",
+        score: 0.9,
+      },
+    ];
+
+    const result = deduplicateResults(items);
+    expect(result).toEqual([
+      {
+        title: "Zebra then Apple",
+        url: "https://example.com/search?q=zebra&q=apple",
+        score: 0.8,
+      },
+      {
+        title: "Apple then Zebra",
+        url: "https://example.com/search?q=apple&q=zebra",
+        score: 0.9,
       },
     ]);
   });

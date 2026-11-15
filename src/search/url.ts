@@ -55,10 +55,6 @@ export function normalizeUrl(rawUrl: string): string | null {
     return null;
   }
 
-  if (parsed.hostname.length === 0) {
-    return null;
-  }
-
   parsed.hostname = parsed.hostname.toLowerCase();
   parsed.hash = "";
 
@@ -69,12 +65,10 @@ export function normalizeUrl(rawUrl: string): string | null {
     }
   }
 
-  retainedParams.sort((left, right) => {
-    if (left[0] !== right[0]) {
-      return left[0] < right[0] ? -1 : 1;
-    }
-    if (left[1] !== right[1]) {
-      return left[1] < right[1] ? -1 : 1;
+  // Sort parameter names stably while preserving the original order of repeated values.
+  retainedParams.sort(([leftKey], [rightKey]) => {
+    if (leftKey !== rightKey) {
+      return leftKey < rightKey ? -1 : 1;
     }
     return 0;
   });
@@ -103,8 +97,7 @@ export function deduplicateResults<
     readonly score?: number | null | undefined;
   },
 >(items: readonly T[]): T[] {
-  const deduplicated: T[] = [];
-  const indexByUrl = new Map<string, number>();
+  const byUrl = new Map<string, T>();
 
   for (const item of items) {
     const canonicalUrl = normalizeUrl(item.url);
@@ -117,15 +110,9 @@ export function deduplicateResults<
       url: canonicalUrl,
     };
 
-    const existingIndex = indexByUrl.get(canonicalUrl);
-    if (existingIndex === undefined) {
-      indexByUrl.set(canonicalUrl, deduplicated.length);
-      deduplicated.push(normalizedItem);
-      continue;
-    }
-
-    const existingItem = deduplicated[existingIndex];
+    const existingItem = byUrl.get(canonicalUrl);
     if (existingItem === undefined) {
+      byUrl.set(canonicalUrl, normalizedItem);
       continue;
     }
 
@@ -136,9 +123,9 @@ export function deduplicateResults<
       candidateScore !== null &&
       (existingScore === null || candidateScore > existingScore)
     ) {
-      deduplicated[existingIndex] = normalizedItem;
+      byUrl.set(canonicalUrl, normalizedItem);
     }
   }
 
-  return deduplicated;
+  return Array.from(byUrl.values());
 }
