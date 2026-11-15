@@ -104,9 +104,13 @@ describe("Card-backed provider quarantine negative verification (#132)", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       const calledUrls = fetchSpy.mock.calls.map((call) => String(call[0]));
       expect(calledUrls).toEqual(["https://api.tavily.com/search"]);
+      const calledHosts = calledUrls.map((url) => new URL(url).hostname);
       expect(
-        calledUrls.some(
-          (url) => url.includes("brave.com") || url.includes("api.parallel.ai"),
+        calledHosts.some(
+          (host) =>
+            host === "brave.com" ||
+            host.endsWith(".brave.com") ||
+            host === "api.parallel.ai",
         ),
       ).toBe(false);
     },
