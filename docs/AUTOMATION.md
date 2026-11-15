@@ -56,10 +56,12 @@ reviews through `https://shunt-shim.gordon-pn.com/v1` with model alias `fast`.
 When `REVIEW_GATEWAY_TOKEN` is absent, both fall back to direct DeepSeek access
 using `DEEPSEEK_API_KEY`; when both secrets are absent, their review steps
 skip cleanly. Keep draft PRs as drafts while configuring automation.
-PR-Agent also accepts created/edited comments on PRs from OWNER, MEMBER, or
-COLLABORATOR authors, excluding bots. Its issue-comment workflow becomes usable
-after merging to the default branch. Trusted commands may review fork PRs through
-the GitHub API; neither reviewer checks out or executes PR code with its secret.
+PR-Agent accepts created/edited comments on PRs from OWNER, MEMBER, or
+COLLABORATOR authors, excluding bots; DeepSeek Review accepts the same trusted
+PR comments when they mention `/review` (`watch-mention: '/review'`). Their
+issue-comment workflows become usable after merging to the default branch.
+Trusted commands may review fork PRs through the GitHub API; neither reviewer
+checks out or executes PR code with its secret.
 
 In gateway mode, PR-Agent sets `CONFIG__MODEL=openai/fast`,
 `CONFIG__FALLBACK_MODELS=[]`, `CONFIG__MAX_MODEL_TOKENS=128000`,
