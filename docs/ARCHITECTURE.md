@@ -94,7 +94,7 @@ Incoming HTTP requests are routed through Hono. Supported routes are `GET /v1/mo
 The `diagnosticsMiddleware` captures request timing, extracts an existing `x-request-id` header or generates a UUID, attaches it to the response header, and emits a structured JSON diagnostic event upon completion adhering to the safe allowlist.
 
 ### Stage 3: Authentication
-The gateway validates credentials from either `Authorization: Bearer <token>` or `x-api-key: <token>`. Both headers must match the single random secret in `GATEWAY_TOKENS`. If both headers are supplied, they must match each other. Missing, empty, or invalid tokens return HTTP 401 Unauthorized. Provider keys are never sent to clients.
+The gateway validates credentials from either `Authorization: Bearer <token>` or `x-api-key: <token>`. Supplied credentials must match one of the configured comma-separated secrets in `GATEWAY_TOKENS`. If both headers are supplied on the same request, they must match each other. Missing, empty, or invalid tokens return HTTP 401 Unauthorized. Provider keys are never sent to clients.
 
 ### Stage 4: Body Size Limit
 Requests are read with a 10 MB limit (`10,485,760` bytes). Payloads exceeding this ceiling return HTTP 413 `payload_too_large` before JSON parsing.

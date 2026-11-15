@@ -77,21 +77,17 @@ just generate-token
    The local edge server listens by default at `http://127.0.0.1:8787`.
 
 ### Coordinated Secret Rotation
-Because the MVP enforces single-token authentication via exact string comparison in `authMiddleware`, rotating the gateway secret causes active clients presenting the old token to receive HTTP 401 until their configuration is updated. Overlapping multi-token support is deferred to post-MVP.
+`GATEWAY_TOKENS` accepts comma-separated bearer tokens, allowing overlapping zero-downtime rotation and independent revocation of client tokens (for example separating `PRODUCTION_GATEWAY_TOKENS` from a PR review token).
 
-To execute a coordinated token rotation:
-1. Generate a new secret: `just generate-token`.
-2. Prepare updated client configurations in downstream runners (for example, repository secrets for DeepSeek Reviewer, OpenCodeReview, or PR-Agent).
-3. Update the Cloudflare Workers secret:
+To rotate a token without downtime:
+1. Generate a replacement secret: `just generate-token`.
+2. Add the new secret alongside the active token in `GATEWAY_TOKENS` (`"<active-token>,<new-token>"`), or update only the token slot being rotated, and push it to the Worker:
    ```bash
    pnpm exec wrangler secret put GATEWAY_TOKENS
    ```
-   Enter the new token at Wrangler's prompt, or update `.dev.vars` and run `just provision-secrets`.
-4. Immediately apply the new bearer token to downstream client configurations.
-5. Verify ingress connectivity and authentication with the new credential:
-   ```bash
-   just verify-ingress https://shunt-shim.<subdomain>.workers.dev
-   ```
+   Or update `.dev.vars` and run `just provision-secrets`.
+3. Update downstream client configurations to use the new secret and verify with `just verify-ingress --token "<new-token>" https://shunt-shim.<subdomain>.workers.dev`.
+4. Remove the retired token from `GATEWAY_TOKENS` and re-run `just provision-secrets` (or `wrangler secret put GATEWAY_TOKENS`) so the old secret immediately returns HTTP 401.
 
 ## 3. Production Deployment to Cloudflare Workers
 

@@ -24,7 +24,7 @@ If every eligible provider is exhausted, return an explicit error.
 | Area | Scope |
 | :--- | :--- |
 | Deployment | One gateway instance or service; no database |
-| Authentication | One random gateway secret accepted via Bearer or `x-api-key` |
+| Authentication | Static bearer secret(s) via comma-separated `GATEWAY_TOKENS`, accepted via Bearer or `x-api-key` |
 | Endpoints | `GET /v1/models`; one completion handler at `/v1/chat/completions` and `/chat/completions` |
 | Routing | One alias, `fast`, with Groq first and Gemini as fallback |
 | Models | Explicit allowlist of models verified available on the configured accounts' free tiers |
