@@ -40,9 +40,16 @@ The `/v1/search` subsystem aggregates upstream web search APIs behind a single a
 
 ### Step 2: Provision Cloudflare Worker Secrets
 
-Upload configured search provider secrets to Cloudflare Workers using Wrangler:
+Load the credentials configured in `.dev.vars` (or export them in your shell), verify neither value is empty so Wrangler never overwrites a secret with zero bytes, and upload them to Cloudflare Workers:
 
 ```bash
+set -a
+source .dev.vars
+set +a
+
+: "${TAVILY_API_KEY:?TAVILY_API_KEY must be set and non-empty}"
+: "${EXA_API_KEY:?EXA_API_KEY must be set and non-empty}"
+
 printf "%s" "$TAVILY_API_KEY" | pnpm exec wrangler secret put TAVILY_API_KEY
 printf "%s" "$EXA_API_KEY" | pnpm exec wrangler secret put EXA_API_KEY
 ```
@@ -272,8 +279,9 @@ If an upstream provider is returning malformed payloads, authentication errors (
    pnpm exec wrangler secret delete TAVILY_API_KEY
    ```
 2. Verify via `curl` smoke probe (Section 3, Check 3) that `/v1/search` succeeds using the remaining healthy provider.
-3. Once the upstream incident is resolved or a replacement key is generated, restore the secret:
+3. Once the upstream incident is resolved or a replacement key is generated, reload `.dev.vars` (or export the replacement key), confirm it is non-empty, and restore the secret:
    ```bash
+   : "${TAVILY_API_KEY:?TAVILY_API_KEY must be set and non-empty}"
    printf "%s" "$TAVILY_API_KEY" | pnpm exec wrangler secret put TAVILY_API_KEY
    ```
 
