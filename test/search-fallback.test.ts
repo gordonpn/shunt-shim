@@ -163,7 +163,7 @@ describe("Sequential Search Fallback Router (Story #138)", () => {
                 : input.toString();
           calledUrls.push(url);
 
-          if (url.includes("api.tavily.com")) {
+          if (new URL(url).hostname === "api.tavily.com") {
             return new Promise<Response>((_, reject) => {
               init?.signal?.addEventListener("abort", () => {
                 reject(
