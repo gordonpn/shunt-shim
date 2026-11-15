@@ -42,6 +42,9 @@ All 6 foundation PRs are `MERGEABLE`, have 0 unresolved threads, and pass all au
 4. **Search Operations, MCP Integration, and Preview Safeguards:**
    - Merge Tier 5-6 docs/research PRs ([#187](https://github.com/gordonpn/shunt-shim/pull/187), [#184](https://github.com/gordonpn/shunt-shim/pull/184), [#192](https://github.com/gordonpn/shunt-shim/pull/192), [#176](https://github.com/gordonpn/shunt-shim/pull/176), [#177](https://github.com/gordonpn/shunt-shim/pull/177), [#179](https://github.com/gordonpn/shunt-shim/pull/179), [#172](https://github.com/gordonpn/shunt-shim/pull/172), [#173](https://github.com/gordonpn/shunt-shim/pull/173), [#174](https://github.com/gordonpn/shunt-shim/pull/174); close stale [#175](https://github.com/gordonpn/shunt-shim/pull/175) once this update merges).
    - Deliver MCP server (`#150`-`#152`) and mock agent tests (`#155`), search query privacy (`#156`-`#159`), telemetry/secret provisioning (`#160`-`#162`), offline eval runner (`#149`), and resolve preview compatibility before adopting `SearchQuotaCoordinator` Durable Objects (`#204`, `#134`-`#137`).
+5. **[#211](https://github.com/gordonpn/shunt-shim/issues/211): Configurable Fallback Order and Optional Last-Resort DeepSeek Credit Fallback:**
+   - **Priority:** P2 | **Effort:** M | **Readiness:** READY
+   - Generalize `PRIMARY_PROVIDER` to an ordered provider chain (`FALLBACK_ORDER`) and accept optional `DEEPSEEK_API_KEY` strictly after free-tier providers fail or exhaust quota.
 
 ## BLOCKERS
 
