@@ -224,4 +224,14 @@ describe("filterEligibleProviders", () => {
       providers: [CARD_BACKED_PROVIDER],
     });
   });
+
+  it("returns 503 no_eligible_free_providers when an explicitly requested free provider is not in the candidate list", () => {
+    const result = filterEligibleProviders([], {}, "tavily");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(503);
+      expect(result.error.error.code).toBe("no_eligible_free_providers");
+    }
+  });
 });
