@@ -203,3 +203,73 @@ Sources checked on 2026-10-05:
 - [Cloud Run pricing](https://cloud.google.com/run/pricing).
 - [Fly.io pricing](https://fly.io/docs/about/pricing/).
 - [Fly.io free trial](https://fly.io/docs/about/free-trial/).
+
+## Search Gateway MVP Provider Selection and Release Milestone Gates
+
+Status: Proposed design specification. The search gateway endpoints (`/v1/search`), provider adapters, and release milestone gates described below are not yet implemented in the active Cloudflare Worker runtime, which currently serves only the LLM Chat Completions MVP contract (`GET /v1/models`, `POST /v1/chat/completions`, and `POST /chat/completions`).
+
+### Phase 1 Search MVP Provider Selection Criteria
+
+Phase 1 restricts live search dispatch to providers that can operate under a strict zero-card financial boundary while enforcing deterministic quota exhaustion behavior.
+
+#### Selected Phase 1 Candidates
+
+- **Tavily (`tavily`, primary candidate)**:
+  - **Free-tier allowance**: 1,000 free API credits per month on the Researcher plan (`1` credit for `basic` search depth, `2` credits for `advanced` search depth).
+  - **Financial boundary**: Does not require a credit card at signup; enforces an upstream hard stop (HTTP 429 or HTTP 432) when monthly credits are exhausted unless pay-as-you-go is manually enabled.
+  - **Selection rationale**: Predictable per-query credit cost, purpose-built search snippet output for coding and research workflows, and zero-card signup make Tavily the safest primary provider for Phase 1.
+- **Exa (`exa`, secondary fallback candidate)**:
+  - **Free-tier allowance**: $10 in recurring monthly free credits with a calendar reset.
+  - **Financial boundary**: Enforces an upstream hard stop (HTTP 402 Payment Required) when free credits are depleted without a saved payment method or auto-reload.
+  - **Selection rationale**: Provides an independent neural/keyword search index for single-hop failover when Tavily is rate-limited or unavailable, while maintaining a hard financial stop.
+
+#### Mandatory Account Verification Requirements Before Live Enablement
+
+Before enabling either Phase 1 candidate in a deployed environment, the operator must verify all of the following account-level safeguards:
+
+1. **Zero saved payment method**: Confirm in the provider billing dashboard that no credit card, bank account, or backup payment method is attached to the account.
+2. **Auto-recharge and pay-as-you-go disabled**: Confirm that automatic top-ups, overage billing, and pay-as-you-go toggles are explicitly disabled so exhaustion triggers an HTTP 402, HTTP 429, or HTTP 432 error instead of an invoice.
+3. **Confirmed recurring free grant**: Verify on the active account that the free credit grant resets on a recurring monthly schedule rather than operating as a one-time promotional balance.
+4. **Bounded per-request cost**: Restrict gateway adapter defaults to basic search execution (`basic` depth on Tavily; standard search without full-text crawl or research add-ons on Exa) so a single `/v1/search` call cannot consume multi-credit extraction charges.
+
+#### Fail-Closed Policy (`FREE_ONLY_POLICY=true`) and Quarantined Providers
+
+The gateway enforces `FREE_ONLY_POLICY=true` by default. Under this fail-closed policy, the router refuses to initialize or dispatch to any search provider that requires a payment instrument on file or lacks verified recurring free-tier hard stops:
+
+- **Quarantined card-backed providers**: Brave Search API ($5/month credit tier requiring a credit card on file with overage charge exposure) and Parallel Search API (paid per-request billing) are blocked from Phase 1 dispatch.
+- **Quarantined unverified or trial-only providers**: Linkup (credit-card and overage terms require account-level verification), Jina Search (`s.jina.ai`, non-recurring trial balance with paid reload), and Serper.dev (one-time signup credit pool without recurring monthly reset) are excluded from Phase 1 default routing.
+
+#### Search MVP Non-Goals
+
+To preserve the Cloudflare Workers 10 ms CPU budget, 60-second request deadline, and zero-spend guarantee, the following capabilities are explicitly out of scope for the Phase 1 Search MVP:
+
+- **No full-page crawling or content extraction in `/v1/search`**: The search endpoint returns normalized titles, URLs, snippets, and scores only. Deep web crawling, raw HTML scraping, and multi-page research jobs are excluded.
+- **No multi-provider speculative fan-out**: The gateway dispatches sequentially to at most one primary provider and one fallback provider on eligible transient failures. It never queries multiple search providers in parallel to merge or rerank results.
+- **No unauthenticated SearXNG or HTML scraping**: Public SearXNG instances and direct search engine HTML scraping are rejected due to bot mitigation, CAPTCHA blocks, IP bans, and lack of SLA guarantees.
+- **No persistent search result caching**: The Phase 1 gateway remains stateless and does not store query payloads or search results in Cloudflare KV, D1, or external databases.
+
+### Graduation Gates for Card-Backed Search Providers
+
+Card-backed search providers (such as Brave Search API and Parallel Search API) cannot be enabled in production until all four graduation gates below are implemented, tested, and signed off:
+
+1. **Cloudflare Durable Object Atomic Quota Reservation Coordinator (#134, #135)**:
+   - A strongly consistent Cloudflare Durable Object coordinator is deployed in an isolated production environment to serialize credit checks and decrement monthly provider budgets atomically before any upstream HTTP request is dispatched.
+   - Cloudflare KV is explicitly prohibited for financial quota enforcement due to eventual consistency and concurrent write race conditions.
+2. **Reservation Lifecycle and Upstream Timeout Uncertainty Handling (#136)**:
+   - Every quota reservation follows a strict state machine (`reserved` -> `committed` or `released`).
+   - When an upstream request times out, disconnects after request transmission, or returns an ambiguous transport error where upstream billing cannot be ruled out, the reservation remains committed (or enters a conservative quarantine state) so timed-out requests never silently leak paid credits.
+3. **Concurrent Reservation Race-Condition Safety (#137)**:
+   - Automated concurrency tests prove that parallel bursts targeting the exact remaining credit boundary cannot over-allocate quota or bypass the configured monthly cap under simultaneous Worker invocations.
+4. **Provider Terms of Service Compliance and Explicit Operator Opt-In (#159)**:
+   - Legal and operational review confirms that gateway proxying, snippet normalization, and automated coding-agent queries comply with the target provider's Terms of Service.
+   - Production activation requires explicit operator configuration (`FREE_ONLY_POLICY=false`, `ALLOW_CARD_BACKED_PROVIDERS=true`, and a hard numeric monthly budget cap per provider). Missing any of these settings fails closed at startup.
+
+### Phase 1 through Phase 5 Release Milestone Gates
+
+| Milestone Phase | Scope | Entry Prerequisites | Exit and Release Verification Gates |
+| :--- | :--- | :--- | :--- |
+| **Phase 1: Search MVP Foundation and Fail-Closed Policy** | Define `/v1/search` contract, error taxonomy, financial safety matrix, and stateless sequential routing (`tavily` primary, `exa` fallback) under `FREE_ONLY_POLICY=true`. | Approved Search MVP specifications (#109, #110, #111, #112) and verified zero-card Tavily/Exa accounts. | Contract validation tests pass; `FREE_ONLY_POLICY=true` rejects card-backed or unconfigured providers at startup; sequential failover and non-retryable error surfacing (400/401/402/429) pass with mocked upstreams and live smoke tests. |
+| **Phase 2: Distributed Atomic Quota Reservations** | Implement Cloudflare Durable Object quota coordinator (#134, #135), reservation state machine (#136), and concurrency safety harness (#137). | Phase 1 exit gates passed; Durable Object bindings and storage migrations provisioned in isolated staging/production environments. | Zero quota over-allocation under simulated parallel load (#137); upstream timeouts preserve conservative credit accounting (#136); coordinator unavailability fails closed before upstream dispatch. |
+| **Phase 3: Secondary Provider Expansion** | Onboard card-backed or secondary search providers (such as Brave Search and Linkup) behind the Durable Object quota coordinator and explicit operator opt-in flags. | Phase 2 exit gates passed; all four card-backed graduation gates (#134, #135, #136, #137, #159) verified. | Operator opt-in guards (`FREE_ONLY_POLICY=false`, `ALLOW_CARD_BACKED_PROVIDERS=true`, bounded monthly cap) enforced; adapter normalization and quota hard-stop tests pass for each expanded provider. |
+| **Phase 4: Model Context Protocol Server and Coding Agent Integration** | Expose `/v1/search` through an MCP server interface and integrate search tool definitions with automated code review and coding agents. | Phase 1 (and optional Phase 2/3) search gateway deployed and stable; MCP tool schema and authentication contract defined. | End-to-end MCP client and coding-agent smoke tests pass against the deployed gateway with bounded latency, structured error propagation, and zero credential leakage in logs. |
+| **Phase 5: Offline Quality Evaluation and Extended Content Extraction** | Benchmark cross-provider relevance/latency offline and evaluate optional separate endpoints for bounded content extraction (`POST /v1/extract`). | Stable production telemetry from Phases 1-4 and explicit per-operation credit multipliers defined in the quota coordinator. | Offline evaluation harness produces reproducible relevance/cost reports; any extraction endpoint enforces isolated credit budgets without regressing `/v1/search` 10 ms Worker CPU bounds. |
