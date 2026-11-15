@@ -86,7 +86,7 @@ To rotate a token without downtime:
    pnpm exec wrangler secret put GATEWAY_TOKENS
    ```
    Or update `.dev.vars` and run `just provision-secrets`.
-3. Update downstream client configurations to use the new secret and verify with `just verify-ingress --token "<new-token>" https://shunt-shim.<subdomain>.workers.dev`.
+3. Update downstream client configurations to use the new secret and verify with `just verify-ingress https://shunt-shim.<subdomain>.workers.dev --token "<new-token>"`.
 4. Remove the retired token from `GATEWAY_TOKENS` and re-run `just provision-secrets` (or `wrangler secret put GATEWAY_TOKENS`) so the old secret immediately returns HTTP 401.
 
 ## 3. Production Deployment to Cloudflare Workers

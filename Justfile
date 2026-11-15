@@ -79,8 +79,8 @@ rollback deployment_id="":
     pnpm exec wrangler rollback {{ if deployment_id != "" { deployment_id } else { "" } }} -y
 
 # Verify ingress endpoints and conformance
-verify-ingress url:
-    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }}
+verify-ingress url *args:
+    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }} {{ args }}
 
 # Verify ingress endpoints with live end-to-end chat completion
 verify-ingress-live url:
