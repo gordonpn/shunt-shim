@@ -4,6 +4,8 @@ fallback_models = ["deepseek/deepseek-v4-pro"]
 git_provider = "github"
 
 [pr_reviewer]
+# Avoid ticket_markdown_logic crashes when smaller models emit requirement lists instead of strings.
+require_ticket_analysis_review = false
 extra_instructions = """
 # Role
 Act as a skeptical architecture reviewer. Challenge whether this is the right solution, not merely whether it works.
