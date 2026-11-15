@@ -51,19 +51,29 @@ Neither coverage nor CodeQL currently validates gateway code.
 ## Review actions
 
 DeepSeek Review and PR-Agent run when a human marks a same-repository PR ready
-for review. Both require the DEEPSEEK_API_KEY repository secret; without it their
-review steps skip. Keep draft PRs as drafts while configuring automation.
+for review. Both prefer the `REVIEW_GATEWAY_TOKEN` repository secret to route
+reviews through `https://shunt-shim.gordon-pn.com/v1` with model alias `fast`.
+When `REVIEW_GATEWAY_TOKEN` is absent, both fall back to direct DeepSeek access
+using `DEEPSEEK_API_KEY`; when both secrets are absent, their review steps
+skip cleanly. Keep draft PRs as drafts while configuring automation.
 PR-Agent also accepts created/edited comments on PRs from OWNER, MEMBER, or
 COLLABORATOR authors, excluding bots. Its issue-comment workflow becomes usable
 after merging to the default branch. Trusted commands may review fork PRs through
 the GitHub API; neither reviewer checks out or executes PR code with its secret.
 
-The workflows retain direct DeepSeek access. PR-Agent uses
-deepseek/deepseek-v4-flash for primary and deepseek/deepseek-v4-pro for fallback;
-DeepSeek Review uses its pinned action's default model. They do not exercise the
-proposed shunt-shim endpoint. Store the provider key as DEEPSEEK_API_KEY in
-repository secrets; no keys are copied from SnapTally. Both jobs are limited to
-ten minutes.
+In gateway mode, PR-Agent sets `CONFIG__MODEL=openai/fast`,
+`CONFIG__FALLBACK_MODELS=[]`, `CONFIG__MAX_MODEL_TOKENS=128000`,
+`CONFIG__CUSTOM_MODEL_MAX_TOKENS=128000`, and
+`OPENAI__API_BASE=https://shunt-shim.gordon-pn.com/v1` with `DEEPSEEK_API_KEY`
+and `OPENAI_KEY` cleared from the step environment; DeepSeek Review sets
+`base-url=https://shunt-shim.gordon-pn.com/v1` and `model=fast`. In fallback
+mode (`REVIEW_GATEWAY_TOKEN` absent), PR-Agent uses `deepseek/deepseek-v4-flash`
+with fallback `deepseek/deepseek-v4-pro` against `https://api.deepseek.com`,
+and DeepSeek Review uses its action defaults (`https://api.deepseek.com` and
+`deepseek-v4-flash`). No keys are copied from SnapTally, and `REVIEW_GATEWAY_TOKEN`
+must be configured in `GATEWAY_TOKENS` as an independent token (separate from
+`PRODUCTION_GATEWAY_TOKENS`) once multi-token support is deployed. Both jobs are
+limited to ten minutes.
 
 The source PR-Agent action pulls a mutable github_action Docker tag even when
 its action commit is pinned. This workflow uses that same action image pinned to
