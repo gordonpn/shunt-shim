@@ -312,6 +312,18 @@ describe("SearchProviderRegistry credential detection and lookup", () => {
         .getAvailableProviders(unconfiguredPrimaryEnv)
         .map((provider) => provider.id),
     ).toEqual(["tavily", "exa", "brave"]);
+
+    const whitespacePrimaryEnv: SearchProviderEnv = {
+      TAVILY_API_KEY: "tvly-secret-123",
+      EXA_API_KEY: "exa-secret-456",
+      PRIMARY_SEARCH_PROVIDER: "   ",
+    };
+
+    expect(
+      registry
+        .getAvailableProviders(whitespacePrimaryEnv)
+        .map((provider) => provider.id),
+    ).toEqual(["tavily", "exa"]);
   });
 
   it("rejects empty provider IDs during registration and allows overriding existing registrations", () => {

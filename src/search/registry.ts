@@ -104,10 +104,7 @@ export class SearchProviderRegistry {
           (provider) => normalizeProviderId(provider.id) === primaryId,
         );
         if (primaryIndex > 0) {
-          const [primaryProvider] = available.splice(primaryIndex, 1);
-          if (primaryProvider !== undefined) {
-            available.unshift(primaryProvider);
-          }
+          available.unshift(...available.splice(primaryIndex, 1));
         }
       }
     }
