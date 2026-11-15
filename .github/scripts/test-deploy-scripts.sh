@@ -125,7 +125,7 @@ MOCK_OUT
     ;;
   verify-ingress)
     url="$2"
-    if [ "${FAIL_VERIFY:-false}" = "true" ]; then
+    if [ "${FAIL_VERIFY:-false}" = "true" ] || { [ "${FAIL_CUSTOM_DOMAIN:-false}" = "true" ] && [ "$url" = "https://shunt-shim.gordon-pn.com" ]; }; then
       if [ "${FAIL_POST_ROLLBACK:-false}" != "true" ] && grep -q "^rollback$" "$MOCK_LOG"; then
         echo "Post-rollback ingress check passed for $url"
         exit 0
@@ -316,5 +316,31 @@ if ! echo "$output" | grep -q "Error: Post-rollback ingress verification also fa
   echo "Expected failed recovery report in output, got: $output" >&2
   exit 1
 fi
+
+# Custom-domain failure must fail the release even when workers.dev is healthy.
+for recovery in false true; do
+  : > "$MOCK_LOG"
+  set +e
+  output=$(env -i PATH="$MOCK_BIN:$PATH" MOCK_LOG="$MOCK_LOG" \
+    CLOUDFLARE_API_TOKEN="dummy-token" CLOUDFLARE_ACCOUNT_ID="dummy-account" \
+    FAIL_CUSTOM_DOMAIN=true FAIL_POST_ROLLBACK="$recovery" \
+    bash "$REPO_ROOT/.github/scripts/deploy-production.sh" 2>&1)
+  status=$?
+  set -e
+  if [ "$status" -eq 0 ] || ! grep -q '^rollback$' "$MOCK_LOG"; then
+    echo "Expected unhealthy custom domain to fail deployment and roll back: $output" >&2
+    exit 1
+  fi
+  if [ "$(grep -c '^verify-ingress https://shunt-shim.gordon-pn.com$' "$MOCK_LOG")" -ne 2 ] ||
+     [ "$(grep -c '^verify-ingress https://shunt-shim.subdomain.workers.dev$' "$MOCK_LOG")" -ne 2 ]; then
+    echo "Expected both endpoints checked before and after rollback: $(cat "$MOCK_LOG")" >&2
+    exit 1
+  fi
+  if [ "$recovery" = false ]; then
+    grep -q 'Rollback restored healthy ingress' <<< "$output"
+  else
+    grep -q 'Post-rollback ingress verification also failed' <<< "$output"
+  fi
+done
 
 echo "All deploy script test cases passed successfully."
