@@ -54,9 +54,9 @@ Replace `https://shunt-shim.<your-subdomain>.workers.dev` with `http://127.0.0.1
 
 ### 3.1 Antigravity CLI (`agy-cli`)
 
-`agy-cli` reads remote MCP server definitions from `mcp_config.json` (typically located at `~/.gemini/antigravity/mcp_config.json` or `~/.config/agy/mcp_config.json`).
+`agy-cli` reads remote MCP server definitions from `~/.gemini/config/mcp_config.json` (global) or `<workspace>/.agents/mcp_config.json` (workspace). Remote servers require Streamable HTTP via `serverUrl`; legacy HTTP+SSE and the `httpUrl` field are not supported.
 
-#### Streamable HTTP (`/mcp`, recommended)
+#### Streamable HTTP (`/mcp`)
 
 ```json
 {
@@ -71,35 +71,18 @@ Replace `https://shunt-shim.<your-subdomain>.workers.dev` with `http://127.0.0.1
 }
 ```
 
-#### Server-Sent Events (`/sse`, fallback transport)
-
-If your `agy-cli` build expects an SSE endpoint key (`url` or `sseUrl`), point it at `/sse`:
-
-```json
-{
-  "mcpServers": {
-    "shunt-shim": {
-      "url": "https://shunt-shim.<your-subdomain>.workers.dev/sse",
-      "headers": {
-        "Authorization": "Bearer ${SHUNT_SHIM_TOKEN}"
-      }
-    }
-  }
-}
-```
-
 ### 3.2 Claude Code
 
 Claude Code supports remote HTTP and SSE MCP servers via the `claude mcp add` CLI or declarative JSON configuration in `~/.claude.json` (user scope) and `.mcp.json` (project scope).
 
 #### Option A: Register via CLI (user scope, recommended)
 
-Ensure `SHUNT_SHIM_TOKEN` is exported in your shell, then register the Streamable HTTP endpoint:
+Single-quote the `--header` argument so the shell passes the literal `${SHUNT_SHIM_TOKEN}` reference to Claude Code instead of expanding the secret in plaintext into `~/.claude.json` (Claude Code expands `${SHUNT_SHIM_TOKEN}` at runtime when exported in your shell):
 
 ```bash
 claude mcp add --transport http --scope user shunt-shim \
   "https://shunt-shim.<your-subdomain>.workers.dev/mcp" \
-  --header "Authorization: Bearer ${SHUNT_SHIM_TOKEN}"
+  --header 'Authorization: Bearer ${SHUNT_SHIM_TOKEN}'
 ```
 
 To use the SSE transport instead:
@@ -107,7 +90,7 @@ To use the SSE transport instead:
 ```bash
 claude mcp add --transport sse --scope user shunt-shim \
   "https://shunt-shim.<your-subdomain>.workers.dev/sse" \
-  --header "Authorization: Bearer ${SHUNT_SHIM_TOKEN}"
+  --header 'Authorization: Bearer ${SHUNT_SHIM_TOKEN}'
 ```
 
 Verify registration in Claude Code:
