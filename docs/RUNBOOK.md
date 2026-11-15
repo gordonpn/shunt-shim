@@ -143,7 +143,7 @@ To deploy an isolated Worker version with a preview alias locally:
 ```bash
 just deploy-preview pr-80
 ```
-Use a dedicated non-production Cloudflare account with a pre-existing `shunt-shim` Worker for PR previews. Bootstrap it from trusted code with a preview-only config without production domain routes before enabling preview credentials. Never give PR-controlled code production provisioning credentials.
+Use a dedicated non-production Cloudflare account with a pre-existing `shunt-shim` Worker for PR previews. Bootstrap it from trusted code with a preview-only config without production domain routes before enabling preview credentials. Never give PR-controlled code production provisioning credentials, and never provision live free-tier upstream API keys on the preview Worker (to avoid consuming free quota): use dummy `GROQ_API_KEY` / `GEMINI_API_KEY` values for standard 11-probe `just verify-ingress` (which makes no upstream calls), or set `GROQ_BASE_URL` and `GEMINI_BASE_URL` to an `https://` mock upstream when testing `--live` completions.
 
 This uploads a Worker Version with `preview_urls: true` and generates a deterministic endpoint (for example, `https://pr-80-shunt-shim.<subdomain>.workers.dev`) without shifting production traffic.
 

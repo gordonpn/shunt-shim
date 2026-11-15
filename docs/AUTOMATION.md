@@ -104,9 +104,14 @@ Cloudflare credentials skip deployment; ordinary CI checks still run.
 
 Before enabling preview secrets, bootstrap `shunt-shim` in the preview account
 from trusted code, with a preview-only config that has no production domain
-routes, and provision dummy or separately approved runtime secrets. `wrangler
-versions upload` requires an existing Worker; PR automation must not bootstrap
-production or modify production DNS to repair that prerequisite.
+routes, and provision dummy upstream provider keys so previews never consume
+live free-tier quota. `wrangler versions upload` requires an existing Worker; PR
+automation must not bootstrap production or modify production DNS to repair that
+prerequisite. Standard preview ingress verification (`just verify-ingress`,
+Probes 1-11) runs without `--live` and makes no upstream provider requests; if
+testing completions against a preview Worker, override `GROQ_BASE_URL` and
+`GEMINI_BASE_URL` to point to an `https://` mock responder instead of live
+provider APIs.
 
 Migration requires operator action: rotate and remove the legacy repository
 `CLOUDFLARE_API_TOKEN` and production `GATEWAY_TOKENS` after provisioning the
