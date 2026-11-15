@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SearchClientAbortError,
+  SearchExecutionError,
   SearchTimeoutError,
 } from "../src/search/errors.js";
 import {
@@ -227,5 +228,253 @@ describe("Search Per-Attempt Timeout and Cancellation (Task #139)", () => {
 
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("throws SearchTimeoutError immediately without calling provider when deadlineSignal is already aborted", async () => {
+    const deadlineController = new AbortController();
+    deadlineController.abort(new DOMException("Deadline hit", "TimeoutError"));
+    const searchSpy = vi.fn();
+
+    await expect(
+      dispatchSearchWithTimeout(
+        { id: "tavily", search: searchSpy },
+        { query: "expired deadline" },
+        {},
+        { deadlineSignal: deadlineController.signal },
+      ),
+    ).rejects.toThrow(SearchTimeoutError);
+
+    expect(searchSpy).not.toHaveBeenCalled();
+  });
+
+  it("throws SearchClientAbortError if clientSignal aborts during synchronous resolution or via isClientAbort error", async () => {
+    const clientController = new AbortController();
+    const abortDuringResolve: SearchProvider = {
+      id: "tavily",
+      search: async () => {
+        clientController.abort();
+        return { results: [] };
+      },
+    };
+
+    await expect(
+      dispatchSearchWithTimeout(
+        abortDuringResolve,
+        { query: "abort right before return" },
+        {},
+        { clientSignal: clientController.signal },
+      ),
+    ).rejects.toThrow(SearchClientAbortError);
+
+    const clientAbortExecutionErr: SearchProvider = {
+      id: "tavily",
+      search: async () => {
+        throw new SearchExecutionError("Aborted upstream", {
+          status: 503,
+          reason: "upstream_unavailable",
+          isClientAbort: true,
+        });
+      },
+    };
+
+    await expect(
+      dispatchSearchWithTimeout(clientAbortExecutionErr, {
+        query: "execution client abort",
+      }),
+    ).rejects.toThrow(SearchClientAbortError);
+
+    const directClientAbortErr: SearchProvider = {
+      id: "tavily",
+      search: async () => {
+        throw new SearchClientAbortError("Direct client abort", "tavily");
+      },
+    };
+
+    await expect(
+      dispatchSearchWithTimeout(directClientAbortErr, {
+        query: "direct client abort",
+      }),
+    ).rejects.toThrow("Direct client abort");
+  });
+
+  it("preserves and classifies thrown errors during dispatch", async () => {
+    const cases: Array<{
+      label: string;
+      thrown: unknown;
+      assertError: (err: unknown) => void;
+    }> = [
+      {
+        label: "DOMException TimeoutError",
+        thrown: new DOMException("Timed out", "TimeoutError"),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchTimeoutError);
+        },
+      },
+      {
+        label: "TypeError with empty message",
+        thrown: new TypeError(""),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).reason).toBe("network_error");
+          expect((err as SearchExecutionError).message).toContain(
+            "Network failure",
+          );
+        },
+      },
+      {
+        label: "Structured client abort object",
+        thrown: { isClientAbort: true, message: "Client closed" },
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchClientAbortError);
+        },
+      },
+      {
+        label: "Native AbortError without clientSignal",
+        thrown: new DOMException("Operation aborted", "AbortError"),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchClientAbortError);
+        },
+      },
+      {
+        label: "Duck-typed TimeoutError object",
+        thrown: { name: "TimeoutError", message: "Custom timeout" },
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchTimeoutError);
+          expect((err as SearchTimeoutError).message).toBe("Custom timeout");
+        },
+      },
+      {
+        label: "Structured upstream_timeout reason",
+        thrown: { reason: "upstream_timeout" },
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchTimeoutError);
+        },
+      },
+      {
+        label: "Structured unauthorized error object",
+        thrown: { status: 401, reason: "unauthorized" },
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).status).toBe(401);
+          expect((err as SearchExecutionError).reason).toBe("unauthorized");
+        },
+      },
+      {
+        label: "Structured reason-only unauthorized error object",
+        thrown: { reason: "unauthorized" },
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).status).toBe(401);
+          expect((err as SearchExecutionError).reason).toBe("unauthorized");
+        },
+      },
+      {
+        label: "Structured status-only 429 error object with retryAfter",
+        thrown: { status: 429, retryAfter: "25" },
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).status).toBe(429);
+          expect((err as SearchExecutionError).reason).toBe(
+            "rate_limit_exceeded",
+          );
+          expect((err as SearchExecutionError).retryAfter).toBe("25");
+        },
+      },
+      {
+        label: "Quarantine message Error",
+        thrown: new Error("Provider in policy quarantine"),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).status).toBe(403);
+          expect((err as SearchExecutionError).reason).toBe(
+            "policy_quarantine",
+          );
+        },
+      },
+      {
+        label: "Client closed message Error",
+        thrown: new Error("Client closed connection"),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchClientAbortError);
+        },
+      },
+      {
+        label: "Timeout message Error",
+        thrown: new Error("Upstream request timed out"),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchTimeoutError);
+        },
+      },
+      {
+        label: "Network message Error",
+        thrown: new Error("connect ECONNREFUSED"),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).reason).toBe("network_error");
+        },
+      },
+      {
+        label: "Generic Error with non-empty message",
+        thrown: new Error("Unexpected upstream exception"),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).status).toBe(502);
+          expect((err as SearchExecutionError).reason).toBe(
+            "upstream_unavailable",
+          );
+          expect((err as SearchExecutionError).message).toBe(
+            "Unexpected upstream exception",
+          );
+        },
+      },
+      {
+        label: "Generic Error with empty message",
+        thrown: new Error(""),
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).status).toBe(502);
+          expect((err as SearchExecutionError).reason).toBe(
+            "upstream_unavailable",
+          );
+        },
+      },
+      {
+        label: "Unrecognized plain object",
+        thrown: { foo: "bar" },
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).status).toBe(502);
+          expect((err as SearchExecutionError).reason).toBe(
+            "upstream_unavailable",
+          );
+        },
+      },
+      {
+        label: "Non-object primitive rejection",
+        thrown: "unexpected string rejection",
+        assertError: (err) => {
+          expect(err).toBeInstanceOf(SearchExecutionError);
+          expect((err as SearchExecutionError).status).toBe(502);
+          expect((err as SearchExecutionError).reason).toBe(
+            "upstream_unavailable",
+          );
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const provider: SearchProvider = {
+        id: "tavily",
+        search: async () => {
+          throw testCase.thrown;
+        },
+      };
+
+      const caught = await dispatchSearchWithTimeout(provider, {
+        query: testCase.label,
+      }).catch((err: unknown) => err);
+
+      testCase.assertError(caught);
+    }
   });
 });

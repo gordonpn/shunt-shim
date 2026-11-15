@@ -5,6 +5,9 @@ import {
   SearchTimeoutError,
 } from "../src/search/errors.js";
 import {
+  createExaProvider,
+  createTavilyProvider,
+  filterEligibleSearchProviders,
   routeSearchRequest,
   SEARCH_CONNECT_TIMEOUT_MS,
   SEARCH_TOTAL_DEADLINE_MS,
@@ -461,6 +464,574 @@ describe("Sequential Search Fallback Router (Story #138)", () => {
           attempts: 2,
           fallbackOccurred: true,
           fallbackReason: "upstream_timeout",
+        });
+      }
+    });
+
+    it("returns HTTP 503 service_unavailable when all providers fail with 503", async () => {
+      const result = await routeSearchRequest(
+        { query: "all 503" },
+        [
+          {
+            id: "tavily",
+            search: async () => {
+              throw createSearchHttpError(503, "tavily");
+            },
+          },
+          {
+            id: "exa",
+            search: async () => {
+              throw createSearchHttpError(503, "exa");
+            },
+          },
+        ],
+        mockSearchEnv,
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(503);
+        expect(result.error.error.code).toBe("service_unavailable");
+      }
+    });
+
+    it("omits Retry-After header when all providers fail with 429 without Retry-After", async () => {
+      const result = await routeSearchRequest(
+        { query: "429 no retry-after" },
+        [
+          {
+            id: "tavily",
+            search: async () => {
+              throw createSearchHttpError(429, "tavily");
+            },
+          },
+        ],
+        mockSearchEnv,
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(429);
+        expect(result.headers).toBeUndefined();
+      }
+    });
+
+    it("returns HTTP 403 for forbidden and policy_quarantine terminal errors without calling fallback", async () => {
+      const exaSpy = vi.fn();
+
+      const forbiddenResult = await routeSearchRequest({ query: "forbidden" }, [
+        {
+          id: "tavily",
+          search: async () => {
+            throw new SearchExecutionError("", {
+              status: 403,
+              reason: "forbidden",
+              provider: "tavily",
+            });
+          },
+        },
+        { id: "exa", search: exaSpy },
+      ]);
+
+      expect(forbiddenResult.ok).toBe(false);
+      if (!forbiddenResult.ok) {
+        expect(forbiddenResult.status).toBe(403);
+        expect(forbiddenResult.error.error.code).toBe("forbidden");
+        expect(forbiddenResult.error.error.message).toContain(
+          "forbidden or quarantined",
+        );
+      }
+
+      const quarantineResult = await routeSearchRequest(
+        { query: "quarantined" },
+        [
+          {
+            id: "tavily",
+            search: async () => {
+              throw new Error("Provider quarantined by budget policy");
+            },
+          },
+          { id: "exa", search: exaSpy },
+        ],
+      );
+
+      expect(quarantineResult.ok).toBe(false);
+      if (!quarantineResult.ok) {
+        expect(quarantineResult.status).toBe(403);
+        expect(quarantineResult.error.error.code).toBe("policy_quarantine");
+      }
+      expect(exaSpy).not.toHaveBeenCalled();
+    });
+
+    it("preserves structured terminal errors, native AbortError, and fallback defaults during routing", async () => {
+      const exaSpy = vi.fn();
+
+      const structuredUnauthorized = await routeSearchRequest(
+        { query: "structured 401" },
+        [
+          {
+            id: "tavily",
+            search: async () => {
+              throw { status: 401, reason: "unauthorized" };
+            },
+          },
+          { id: "exa", search: exaSpy },
+        ],
+      );
+      expect(structuredUnauthorized.ok).toBe(false);
+      if (!structuredUnauthorized.ok) {
+        expect(structuredUnauthorized.status).toBe(401);
+        expect(structuredUnauthorized.error.error.code).toBe("invalid_api_key");
+      }
+
+      const nativeAbort = await routeSearchRequest({ query: "native abort" }, [
+        {
+          id: "tavily",
+          search: async () => {
+            throw new DOMException("The operation was aborted", "AbortError");
+          },
+        },
+        { id: "exa", search: exaSpy },
+      ]);
+      expect(nativeAbort.ok).toBe(false);
+      if (!nativeAbort.ok) {
+        expect(nativeAbort.status).toBe(504);
+        expect(nativeAbort.error.error.code).toBe("gateway_timeout");
+      }
+      expect(exaSpy).not.toHaveBeenCalled();
+
+      const emptyBadRequest = await routeSearchRequest({ query: "empty 400" }, [
+        {
+          id: "tavily",
+          search: async () => {
+            throw new SearchExecutionError("", {
+              status: 400,
+              reason: "bad_request",
+            });
+          },
+        },
+      ]);
+      expect(emptyBadRequest.ok).toBe(false);
+      if (!emptyBadRequest.ok) {
+        expect(emptyBadRequest.status).toBe(400);
+        expect(emptyBadRequest.error.error.message).toBe(
+          "Invalid search request parameters",
+        );
+      }
+
+      const emptyUnauthorized = await routeSearchRequest(
+        { query: "empty 401" },
+        [
+          {
+            id: "tavily",
+            search: async () => {
+              throw new SearchExecutionError("", {
+                status: 401,
+                reason: "unauthorized",
+              });
+            },
+          },
+        ],
+      );
+      expect(emptyUnauthorized.ok).toBe(false);
+      if (!emptyUnauthorized.ok) {
+        expect(emptyUnauthorized.status).toBe(401);
+        expect(emptyUnauthorized.error.error.message).toBe(
+          "Upstream search provider authentication failed",
+        );
+      }
+    });
+  });
+
+  describe("Environment Provider Ordering, Policy Filtering, and Deadline Rechecks", () => {
+    it("honors SEARCH_PRIMARY_PROVIDER='exa' when using new SearchRouter().route()", async () => {
+      const calledUrls: string[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async (input: RequestInfo | URL) => {
+          const url = typeof input === "string" ? input : input.toString();
+          calledUrls.push(url);
+          return new Response(
+            JSON.stringify({
+              results: [
+                {
+                  title: "Exa Primary",
+                  url: "https://exa.ai/primary",
+                  snippet: "Exa served first.",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        },
+      );
+
+      const router = new SearchRouter();
+      const result = await router.route(
+        { query: "primary exa ordering" },
+        { ...mockSearchEnv, SEARCH_PRIMARY_PROVIDER: "exa" },
+      );
+
+      expect(calledUrls).toEqual(["https://api.exa.ai/search"]);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.provider).toBe("exa");
+        expect(result.data.id).toMatch(/^search-/);
+      }
+    });
+
+    it("allows paid providers when FREE_ONLY_POLICY is 'false' and quarantines when none are eligible", async () => {
+      const paidProvider: SearchProvider = {
+        id: "paid-search",
+        requiresCreditCard: true,
+        search: async () => ({
+          results: [
+            {
+              title: "Paid",
+              url: "https://paid.example/1",
+              snippet: "Paid result",
+            },
+          ],
+        }),
+      };
+
+      expect(
+        filterEligibleSearchProviders([paidProvider], {
+          FREE_ONLY_POLICY: "false",
+        }),
+      ).toHaveLength(1);
+
+      const quarantined = await routeSearchRequest({ query: "none" }, [
+        paidProvider,
+      ]);
+      expect(quarantined.ok).toBe(false);
+      if (!quarantined.ok) {
+        expect(quarantined.status).toBe(403);
+        expect(quarantined.error.error.code).toBe("policy_quarantine");
+        expect(quarantined.diagnostic.attempts).toBe(0);
+      }
+    });
+
+    it("returns 504 immediately when clientSignal is already aborted or totalDeadlineMs <= 0", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const spy = vi.fn();
+
+      const abortedResult = await routeSearchRequest(
+        { query: "pre-aborted" },
+        [{ id: "tavily", search: spy }],
+        mockSearchEnv,
+        { clientSignal: controller.signal },
+      );
+      expect(abortedResult.ok).toBe(false);
+      if (!abortedResult.ok) {
+        expect(abortedResult.status).toBe(504);
+        expect(abortedResult.diagnostic.attempts).toBe(0);
+      }
+
+      const expiredResult = await routeSearchRequest(
+        { query: "zero deadline" },
+        [{ id: "tavily", search: spy }],
+        mockSearchEnv,
+        { totalDeadlineMs: 0 },
+      );
+      expect(expiredResult.ok).toBe(false);
+      if (!expiredResult.ok) {
+        expect(expiredResult.status).toBe(504);
+        expect(expiredResult.error.error.message).toContain(
+          "deadline exceeded",
+        );
+        expect(expiredResult.diagnostic.attempts).toBe(0);
+      }
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("rechecks wall-clock deadline before returning success when synchronous work exceeds totalDeadlineMs", async () => {
+      let simulatedClockMs = 1_000;
+      const slowSyncProvider: SearchProvider = {
+        id: "tavily",
+        search: async () => {
+          simulatedClockMs += 80;
+          return {
+            id: "late-success",
+            results: [
+              {
+                title: "Late",
+                url: "https://example.com/late",
+                snippet: "Arrived after deadline",
+              },
+            ],
+          };
+        },
+      };
+
+      const result = await routeSearchRequest(
+        { query: "sync overrun" },
+        [slowSyncProvider],
+        mockSearchEnv,
+        {
+          totalDeadlineMs: 10,
+          now: () => simulatedClockMs,
+        },
+      );
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(504);
+        expect(result.error.error.code).toBe("gateway_timeout");
+        expect(result.error.error.message).toContain("deadline exceeded");
+        expect(result.diagnostic).toEqual({
+          provider: "tavily",
+          attempts: 1,
+          fallbackOccurred: false,
+        });
+      }
+    });
+
+    it("aborts in-flight provider when totalDeadlineMs timer fires before connectTimeoutMs", async () => {
+      vi.useFakeTimers();
+
+      const hangingProvider: SearchProvider = {
+        id: "tavily",
+        search: (_req, _env, signal) =>
+          new Promise((_, reject) => {
+            signal.addEventListener("abort", () => {
+              reject(signal.reason);
+            });
+          }),
+      };
+
+      const routePromise = routeSearchRequest(
+        { query: "total deadline timer" },
+        [hangingProvider],
+        mockSearchEnv,
+        { connectTimeoutMs: 5_000, totalDeadlineMs: 250 },
+      );
+
+      await vi.advanceTimersByTimeAsync(250);
+      const result = await routePromise;
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.status).toBe(504);
+        expect(result.error.error.message).toContain("deadline exceeded");
+      }
+    });
+  });
+
+  describe("Default HTTP Provider Adapters and Response Normalization", () => {
+    it("sends optional search parameters, trims trailing base URL slashes, and normalizes optional fields", async () => {
+      const fetchCalls: Array<{ url: string; body: string }> = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          fetchCalls.push({
+            url: typeof input === "string" ? input : input.toString(),
+            body: typeof init?.body === "string" ? init.body : "",
+          });
+          return new Response(
+            JSON.stringify({
+              id: "tvly-custom-1",
+              creditsUsed: 3,
+              results: [
+                {
+                  url: "https://example.com/a",
+                  content: "Tavily content snippet",
+                  score: 0.92,
+                  publishedDate: "2026-01-01",
+                },
+                {
+                  title: "Second",
+                  url: "https://example.com/b",
+                  published_date: "2026-01-02",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        },
+      );
+
+      const tavily = createTavilyProvider();
+      const res = await tavily.search(
+        {
+          query: "custom base",
+          maxResults: 3,
+          searchDepth: "advanced",
+          includeDomains: ["example.com"],
+          excludeDomains: ["spam.com"],
+          topic: "news",
+        },
+        { TAVILY_BASE_URL: "https://tavily.proxy.local/v1///" },
+        new AbortController().signal,
+      );
+
+      expect(fetchCalls[0]?.url).toBe("https://tavily.proxy.local/v1/search");
+      expect(res.id).toBe("tvly-custom-1");
+      expect(res.creditsUsed).toBe(3);
+      expect(res.results).toEqual([
+        {
+          title: "",
+          url: "https://example.com/a",
+          snippet: "Tavily content snippet",
+          score: 0.92,
+          publishedDate: "2026-01-01",
+        },
+        {
+          title: "Second",
+          url: "https://example.com/b",
+          snippet: "",
+          publishedDate: "2026-01-02",
+        },
+      ]);
+
+      const exaCalls: string[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementationOnce(
+        async (input: RequestInfo | URL) => {
+          exaCalls.push(typeof input === "string" ? input : input.toString());
+          return new Response(
+            JSON.stringify({
+              usage: { credits: 2 },
+              results: [
+                {
+                  title: "Exa Result",
+                  url: "https://example.com/exa",
+                  snippet: "Exa snippet",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        },
+      );
+
+      const exa = createExaProvider();
+      const exaRes = await exa.search(
+        {
+          query: "exa base",
+          includeDomains: ["docs.example"],
+          excludeDomains: ["ads.example"],
+        },
+        { EXA_BASE_URL: "https://exa.proxy.local///" },
+        new AbortController().signal,
+      );
+      expect(exaCalls).toEqual(["https://exa.proxy.local/search"]);
+      expect(exaRes.creditsUsed).toBe(2);
+      expect(exaRes.results).toHaveLength(1);
+    });
+
+    it("cancels error response bodies and throws structured HTTP errors on non-OK responses", async () => {
+      const tavily = createTavilyProvider();
+      const exa = createExaProvider();
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("rate limited", {
+          status: 429,
+          headers: { "Retry-After": "45" },
+        }),
+      );
+      await expect(
+        tavily.search({ query: "q" }, {}, new AbortController().signal),
+      ).rejects.toMatchObject({
+        status: 429,
+        reason: "rate_limit_exceeded",
+        retryAfter: "45",
+      });
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(null, { status: 503 }),
+      );
+      await expect(
+        exa.search({ query: "q" }, {}, new AbortController().signal),
+      ).rejects.toMatchObject({
+        status: 503,
+        reason: "upstream_unavailable",
+      });
+
+      const abortedController = new AbortController();
+      abortedController.abort();
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("forbidden", { status: 403 }),
+      );
+      await expect(
+        tavily.search({ query: "q" }, {}, abortedController.signal),
+      ).rejects.toMatchObject({
+        status: 403,
+        reason: "forbidden",
+      });
+
+      const failingCancelBody = new ReadableStream({
+        cancel() {
+          throw new Error("cancel failed");
+        },
+      });
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(failingCancelBody, { status: 500 }),
+      );
+      await expect(
+        exa.search({ query: "q" }, {}, new AbortController().signal),
+      ).rejects.toMatchObject({
+        status: 500,
+        reason: "upstream_unavailable",
+      });
+
+      const midCancelController = new AbortController();
+      const hangingCancelBody = new ReadableStream({
+        cancel() {
+          midCancelController.abort();
+          return new Promise(() => {});
+        },
+      });
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(hangingCancelBody, { status: 502 }),
+      );
+      await expect(
+        tavily.search({ query: "q" }, {}, midCancelController.signal),
+      ).rejects.toMatchObject({
+        status: 502,
+        reason: "upstream_unavailable",
+      });
+    });
+
+    it("throws 502 invalid_upstream_response on malformed JSON or invalid result payloads", async () => {
+      const tavily = createTavilyProvider();
+      const exa = createExaProvider();
+      const signal = new AbortController().signal;
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("not-json{", { status: 200 }),
+      );
+      await expect(
+        tavily.search({ query: "q" }, {}, signal),
+      ).rejects.toMatchObject({
+        status: 502,
+        reason: "invalid_upstream_response",
+      });
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("not-json{", { status: 200 }),
+      );
+      await expect(
+        exa.search({ query: "q" }, {}, signal),
+      ).rejects.toMatchObject({
+        status: 502,
+        reason: "invalid_upstream_response",
+      });
+
+      const invalidPayloads = [
+        null,
+        { results: "not-an-array" },
+        { results: [null] },
+        { results: [{ title: "Missing URL" }] },
+      ];
+
+      for (const payload of invalidPayloads) {
+        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+          new Response(JSON.stringify(payload), { status: 200 }),
+        );
+        await expect(
+          tavily.search({ query: "q" }, {}, signal),
+        ).rejects.toMatchObject({
+          status: 502,
+          reason: "invalid_upstream_response",
         });
       }
     });

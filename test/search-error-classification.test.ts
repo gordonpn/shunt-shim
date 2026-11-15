@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   classifyHttpStatusToReason,
   createSearchHttpError,
+  getDefaultStatusForSearchReason,
   isEligibleSearchFallbackError,
+  isSearchErrorReason,
   SearchClientAbortError,
   type SearchErrorReason,
   SearchExecutionError,
@@ -130,6 +132,142 @@ describe("Search Fallback Error Classification (Task #140)", () => {
       error: null,
       expected: false,
     },
+    {
+      name: "Undefined error value",
+      error: undefined,
+      expected: false,
+    },
+    {
+      name: "Primitive string error value",
+      error: "boom",
+      expected: false,
+    },
+    {
+      name: "SearchExecutionError with terminal HTTP 400 even when reason is upstream_unavailable",
+      error: new SearchExecutionError("Bad query", {
+        status: 400,
+        reason: "upstream_unavailable",
+      }),
+      expected: false,
+    },
+    {
+      name: "SearchExecutionError with unrecognized reason and eligible status 503",
+      error: new SearchExecutionError("Transient", {
+        status: 503,
+        reason: "custom_unknown" as SearchErrorReason,
+      }),
+      expected: true,
+    },
+    {
+      name: "SearchExecutionError with unrecognized reason and non-eligible status 418",
+      error: new SearchExecutionError("Teapot", {
+        status: 418,
+        reason: "custom_unknown" as SearchErrorReason,
+      }),
+      expected: false,
+    },
+    {
+      name: "SearchExecutionError with unrecognized reason and no status",
+      error: new SearchExecutionError("Unknown", {
+        reason: "custom_unknown" as SearchErrorReason,
+      }),
+      expected: false,
+    },
+    {
+      name: "Plain object with isClientAbort=true",
+      error: { isClientAbort: true, status: 503 },
+      expected: false,
+    },
+    {
+      name: "Plain object with terminal reason policy_quarantine",
+      error: { reason: "policy_quarantine" },
+      expected: false,
+    },
+    {
+      name: "Plain object with eligible reason rate_limit_exceeded",
+      error: { reason: "rate_limit_exceeded" },
+      expected: true,
+    },
+    {
+      name: "Plain object with unrecognized reason",
+      error: { reason: "unrecognized_reason" },
+      expected: false,
+    },
+    {
+      name: "Plain object with terminal status 401",
+      error: { status: 401 },
+      expected: false,
+    },
+    {
+      name: "Plain object with eligible status 503",
+      error: { status: 503 },
+      expected: true,
+    },
+    {
+      name: "Plain object with unhandled status 418",
+      error: { status: 418 },
+      expected: false,
+    },
+    {
+      name: "Error mentioning quarantine",
+      error: new Error("Provider in policy quarantine"),
+      expected: false,
+    },
+    {
+      name: "Error mentioning client closed",
+      error: new Error("Client closed socket"),
+      expected: false,
+    },
+    {
+      name: "Error mentioning client cancelled",
+      error: new Error("Client cancelled request"),
+      expected: false,
+    },
+    {
+      name: "Error mentioning client canceled",
+      error: new Error("Client canceled request"),
+      expected: false,
+    },
+    {
+      name: "Error mentioning timeout",
+      error: new Error("Connection timeout"),
+      expected: true,
+    },
+    {
+      name: "Error mentioning timed out",
+      error: new Error("Upstream timed out"),
+      expected: true,
+    },
+    {
+      name: "Error mentioning network",
+      error: new Error("Network unreachable"),
+      expected: true,
+    },
+    {
+      name: "Error mentioning fetch failed",
+      error: new Error("fetch failed"),
+      expected: true,
+    },
+    {
+      name: "Error mentioning ECONNREFUSED",
+      error: new Error("connect ECONNREFUSED 127.0.0.1"),
+      expected: true,
+    },
+    {
+      name: "Error mentioning ENOTFOUND",
+      error: new Error("getaddrinfo ENOTFOUND api.tavily.com"),
+      expected: true,
+    },
+    {
+      name: "Error mentioning socket hang up",
+      error: new Error("socket hang up"),
+      expected: true,
+    },
+    {
+      name: "Unrecognized generic Error",
+      error: new Error("unexpected runtime failure"),
+      expected: false,
+    },
   ];
 
   it.each(classificationTable)(
@@ -174,5 +312,21 @@ describe("Search Fallback Error Classification (Task #140)", () => {
     for (const [status, reason] of expectedMappings) {
       expect(classifyHttpStatusToReason(status)).toBe(reason);
     }
+  });
+
+  it("creates HTTP errors without provider or retryAfter and validates SearchErrorReason helpers", () => {
+    const err = createSearchHttpError(500, undefined, "");
+    expect(err.message).toBe("Upstream search provider returned HTTP 500");
+    expect(err.provider).toBeUndefined();
+    expect(err.retryAfter).toBeUndefined();
+    expect(err.reason).toBe("upstream_unavailable");
+
+    expect(isSearchErrorReason("unauthorized")).toBe(true);
+    expect(isSearchErrorReason("rate_limit_exceeded")).toBe(true);
+    expect(isSearchErrorReason("not_a_reason")).toBe(false);
+    expect(isSearchErrorReason(401)).toBe(false);
+
+    expect(getDefaultStatusForSearchReason("unauthorized")).toBe(401);
+    expect(getDefaultStatusForSearchReason("network_error")).toBeUndefined();
   });
 });
