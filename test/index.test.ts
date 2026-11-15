@@ -674,6 +674,16 @@ describe("Gateway HTTP Entrypoint", () => {
       ).not.toThrow();
     });
 
+    it("accepts comma-separated non-empty GATEWAY_TOKENS", () => {
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: "prod-secret, review-secret",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+        }),
+      ).not.toThrow();
+    });
+
     it("throws explicit error when GATEWAY_TOKENS is missing or empty", () => {
       expect(() =>
         validateEnvironment({
@@ -685,6 +695,14 @@ describe("Gateway HTTP Entrypoint", () => {
       expect(() =>
         validateEnvironment({
           GATEWAY_TOKENS: "   ",
+          GROQ_API_KEY: "groq-key",
+          GEMINI_API_KEY: "gemini-key",
+        }),
+      ).toThrow("Missing required environment secret: GATEWAY_TOKENS");
+
+      expect(() =>
+        validateEnvironment({
+          GATEWAY_TOKENS: " , ",
           GROQ_API_KEY: "groq-key",
           GEMINI_API_KEY: "gemini-key",
         }),

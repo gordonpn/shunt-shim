@@ -77,21 +77,20 @@ just generate-token
    The local edge server listens by default at `http://127.0.0.1:8787`.
 
 ### Coordinated Secret Rotation
-Because the MVP enforces single-token authentication via exact string comparison in `authMiddleware`, rotating the gateway secret causes active clients presenting the old token to receive HTTP 401 until their configuration is updated. Overlapping multi-token support is deferred to post-MVP.
+`GATEWAY_TOKENS` accepts comma-separated bearer tokens, allowing overlapping zero-downtime rotation and independent revocation of client tokens (for example separating `PRODUCTION_GATEWAY_TOKENS` from a PR review token).
 
-To execute a coordinated token rotation:
-1. Generate a new secret: `just generate-token`.
-2. Prepare updated client configurations in downstream runners (for example, repository secrets for DeepSeek Reviewer, OpenCodeReview, or PR-Agent).
-3. Update the Cloudflare Workers secret:
+To rotate a token without downtime:
+1. Generate a replacement secret: `just generate-token`.
+2. Add the new secret first alongside every still-active token in `GATEWAY_TOKENS` (`"<new-token>,<active-token>"`) so existing clients keep authenticating during cutover, and push it to the Worker:
    ```bash
    pnpm exec wrangler secret put GATEWAY_TOKENS
    ```
-   Enter the new token at Wrangler's prompt, or update `.dev.vars` and run `just provision-secrets`.
-4. Immediately apply the new bearer token to downstream client configurations.
-5. Verify ingress connectivity and authentication with the new credential:
+   Or update `.dev.vars` and run `just provision-secrets`.
+3. Update downstream client configurations to use the new secret and verify via `.dev.vars` (`GATEWAY_TOKENS` first entry `<new-token>`) without passing secrets as CLI arguments:
    ```bash
    just verify-ingress https://shunt-shim.<subdomain>.workers.dev
    ```
+4. Remove the retired token from `GATEWAY_TOKENS` and re-run `just provision-secrets` (or `wrangler secret put GATEWAY_TOKENS`) so the old secret immediately returns HTTP 401.
 
 ## 3. Production Deployment to Cloudflare Workers
 
@@ -112,7 +111,13 @@ Deploy the bundle to Cloudflare Workers:
 ```bash
 just deploy
 ```
-The deployed worker URL will be displayed in the terminal output (for example, `https://shunt-shim.<your-subdomain>.workers.dev`).
+The deployed worker URLs will be displayed in the terminal output (for example, `https://shunt-shim.<your-subdomain>.workers.dev` and `shunt-shim.gordon-pn.com`).
+
+#### Custom Domain Prerequisites (`shunt-shim.gordon-pn.com`)
+`wrangler.jsonc` binds `shunt-shim.gordon-pn.com` using Cloudflare Workers Custom Domains (`custom_domain: true`), coexisting with explicit `workers_dev: true` and `preview_urls: true`:
+- The `gordon-pn.com` zone must be active in the target Cloudflare account.
+- No conflicting DNS record (`A`, `AAAA`, or `CNAME`) may exist for `shunt-shim.gordon-pn.com`.
+- On `just deploy`, Cloudflare automatically creates the managed DNS record and provisions the edge TLS certificate. Initial certificate issuance can take up to a few minutes.
 
 ### Step 4: Inspect Deployments and Rollback
 List deployment history with versions, timestamps, and deployment IDs:
@@ -137,6 +142,8 @@ To deploy an isolated Worker version with a preview alias locally:
 ```bash
 just deploy-preview pr-80
 ```
+Use a dedicated non-production Cloudflare account with a pre-existing `shunt-shim` Worker for PR previews. Bootstrap it from trusted code with a preview-only config without production domain routes before enabling preview credentials. Never give PR-controlled code production provisioning credentials, and never provision live free-tier upstream API keys on the preview Worker (to avoid consuming free quota): use dummy `GROQ_API_KEY` / `GEMINI_API_KEY` values for standard 11-probe `just verify-ingress` (which makes no upstream calls), or set `GROQ_BASE_URL` and `GEMINI_BASE_URL` to an `https://` mock upstream when testing `--live` completions.
+
 This uploads a Worker Version with `preview_urls: true` and generates a deterministic endpoint (for example, `https://pr-80-shunt-shim.<subdomain>.workers.dev`) without shifting production traffic.
 
 Preview URL lifecycle:
@@ -146,9 +153,9 @@ Preview URL lifecycle:
 
 #### Continuous Delivery Pipeline
 The GitHub Actions deployment workflow (`.github/workflows/deploy.yml`) automates both preview and production releases:
-- Pull requests from the same repository upload a version with `--preview-alias pr-<number>` and run `just verify-ingress`.
-- Merges to `main` run quality checks, execute `just deploy`, verify ingress, and automatically trigger `just rollback` if post-deploy verification fails.
-- Required repository secrets: `CLOUDFLARE_API_TOKEN` (permissions: `Workers Scripts: Edit`, `Account Settings: Read`) and `CLOUDFLARE_ACCOUNT_ID`. Set `GATEWAY_TOKENS` to enable authenticated conformance checks.
+- Pull requests from the same repository with separate preview credentials upload a version with `--preview-alias pr-<number>` and run `just verify-ingress`.
+- Merges to `main` run quality checks, execute `just deploy`, verify both `workers.dev` and the custom domain, and trigger `just rollback` if either fails. Both endpoints are checked after rollback; DNS, routing, or certificate failures may need operator intervention because a Worker-version rollback does not necessarily restore them.
+- Production credentials belong in the `production` GitHub environment restricted to `main`: `CLOUDFLARE_PRODUCTION_API_TOKEN`, `CLOUDFLARE_PRODUCTION_ACCOUNT_ID`, and `PRODUCTION_GATEWAY_TOKENS`. Preview jobs use only `CLOUDFLARE_PREVIEW_API_TOKEN`, `CLOUDFLARE_PREVIEW_ACCOUNT_ID`, and `PREVIEW_GATEWAY_TOKENS` for a separate non-production account. See [credential permissions and migration](AUTOMATION.md#separate-preview-and-production-credentials). Rotate and remove legacy production repository secrets; changing workflow references alone does not revoke them.
 
 ## 4. Verification and Smoke Testing
 
@@ -158,8 +165,9 @@ Run the automated verification suite against local or deployed ingress:
 # Verify local emulator
 just verify-ingress http://127.0.0.1:8787
 
-# Verify deployed worker
+# Verify deployed worker (workers.dev and custom domain)
 just verify-ingress https://shunt-shim.<subdomain>.workers.dev
+just verify-ingress https://shunt-shim.gordon-pn.com
 ```
 
 The recipes load `GATEWAY_TOKENS` from `.dev.vars`; do not pass it as a command-line argument.
@@ -167,6 +175,7 @@ The recipes load `GATEWAY_TOKENS` from `.dev.vars`; do not pass it as a command-
 To execute a live end-to-end chat completion against the primary upstream model through the ingress route:
 ```bash
 just verify-ingress-live https://shunt-shim.<subdomain>.workers.dev
+just verify-ingress-live https://shunt-shim.gordon-pn.com
 ```
 
 ### Automated Ingress Probes Executed

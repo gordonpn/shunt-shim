@@ -40,10 +40,11 @@ this does not claim constant-time execution for the entire request.
   with identical auth, validation, routing, errors, and non-streaming JSON behavior.
 - `GET /v1/models` returns exactly `fast`. Model names are configured opaque
   aliases, not an OpenAI model-name allowlist or arbitrary provider bypass.
-- Accept `Authorization: Bearer <token>` or `x-api-key: <token>` against one
-  independently generated gateway secret. Neither header: 401. Malformed or
-  invalid supplied credentials: 401. If both are supplied, both must match the
-  configured secret; reject conflicting credentials. Never forward either.
+- Accept `Authorization: Bearer <token>` or `x-api-key: <token>` against any
+  comma-separated secret configured in `GATEWAY_TOKENS`. Neither header: 401.
+  Malformed or invalid supplied credentials: 401. If both are supplied, both
+  must match each other and match a configured secret; reject conflicting
+  credentials. Never forward either.
 - Require a JSON object, nonempty model string, and nonempty messages array.
   Support text `system`, `user`, `assistant`, and `tool` roles. Assistant content
   can be null or omitted when tool calls are present; other text content is a

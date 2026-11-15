@@ -1,3 +1,5 @@
+import { parseGatewayTokens } from "./auth.ts";
+
 export interface GatewayEnv {
   GATEWAY_TOKENS?: string;
   GEMINI_API_KEY?: string;
@@ -22,8 +24,7 @@ export const ALLOWED_FALLBACK_MODELS = ["gemini-2.5-flash-lite"] as const;
  * @throws Error if any required secret is missing or if configured models are not allowed.
  */
 export function validateEnvironment(env: GatewayEnv): void {
-  const gatewayTokens = env.GATEWAY_TOKENS?.trim();
-  if (!gatewayTokens) {
+  if (parseGatewayTokens(env.GATEWAY_TOKENS).length === 0) {
     throw new Error("Missing required environment secret: GATEWAY_TOKENS");
   }
 

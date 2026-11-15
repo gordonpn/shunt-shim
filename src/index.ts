@@ -1,6 +1,10 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
-import { constantTimeTokenEqual } from "./auth.js";
+import {
+  constantTimeTokenEqual,
+  matchesAnyGatewayToken,
+  parseGatewayTokens,
+} from "./auth.js";
 import { type DiagnosticRecord, emitDiagnostic } from "./diagnostics.js";
 import { type GatewayEnv, validateEnvironment } from "./environment.js";
 import { createErrorResponse } from "./errors.js";
@@ -70,7 +74,7 @@ export type GatewayMiddleware = MiddlewareHandler<{
 }>;
 
 export const authMiddleware: GatewayMiddleware = async (c, next) => {
-  const configuredToken = c.env?.GATEWAY_TOKENS?.trim();
+  const configuredTokens = parseGatewayTokens(c.env?.GATEWAY_TOKENS);
   const authHeader = c.req.header("Authorization");
   const apiKeyHeader = c.req.header("x-api-key");
 
@@ -121,11 +125,7 @@ export const authMiddleware: GatewayMiddleware = async (c, next) => {
   }
 
   const token = bearerToken ?? trimmedApiKey;
-  if (
-    !token ||
-    !configuredToken ||
-    !(await constantTimeTokenEqual(token, configuredToken))
-  ) {
+  if (!token || !(await matchesAnyGatewayToken(token, configuredTokens))) {
     return c.json(
       createErrorResponse(
         "Incorrect or missing API key provided",
