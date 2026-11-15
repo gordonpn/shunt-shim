@@ -467,12 +467,15 @@ export async function dispatchSearchWithTimeout(
   }
   const combinedSignal = AbortSignal.any(signals);
 
-  let onAbort: (() => void) | undefined;
+  const listenerCleanup = new AbortController();
   const abortPromise = new Promise<never>((_, reject) => {
-    onAbort = () => {
-      reject(combinedSignal.reason);
-    };
-    combinedSignal.addEventListener("abort", onAbort, { once: true });
+    combinedSignal.addEventListener(
+      "abort",
+      () => {
+        reject(combinedSignal.reason);
+      },
+      { once: true, signal: listenerCleanup.signal },
+    );
   });
 
   try {
@@ -516,9 +519,7 @@ export async function dispatchSearchWithTimeout(
     throw toSearchExecutionError(err, provider.id);
   } finally {
     clearTimeout(timer);
-    if (onAbort) {
-      combinedSignal.removeEventListener("abort", onAbort);
-    }
+    listenerCleanup.abort();
   }
 }
 
