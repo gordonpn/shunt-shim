@@ -212,4 +212,126 @@ describe("normalizeSearchResults", () => {
     expect(customNormalized[0]?.snippet.length).toBe(120);
     expect(customNormalized[0]?.snippet.endsWith("...")).toBe(true);
   });
+
+  it("skips items with missing or invalid URLs and handles empty inputs", () => {
+    const raw: RawProviderResultInput[] = [
+      { title: "Missing URL" },
+      { title: "Null URL", url: null },
+      { title: "Invalid URL", url: "not-a-valid-url" },
+      { title: "Unsupported protocol", url: "javascript:alert(1)" },
+      {
+        title: "Valid entry",
+        url: "https://example.com/valid",
+        snippet: "Direct <b>snippet</b> field.",
+      },
+    ];
+
+    expect(normalizeSearchResults([], "tavily")).toEqual([]);
+    expect(normalizeSearchResults(raw, "  tavily  ")).toEqual([
+      {
+        title: "Valid entry",
+        url: "https://example.com/valid",
+        snippet: "Direct snippet field.",
+        published_date: null,
+        score: null,
+        provider: "tavily",
+      },
+    ]);
+  });
+
+  it("handles string and sparse array highlights, blank or unparseable dates, and string or non-finite scores", () => {
+    const malformedArrayItem = JSON.parse(
+      '{"title":"Sparse highlights","url":"https://example.com/sparse","highlights":[123,"   ","Usable highlight"],"published_date":"   ","score":"0.75"}',
+    ) as RawProviderResultInput;
+
+    const raw: RawProviderResultInput[] = [
+      malformedArrayItem,
+      {
+        title: "String highlights and unparseable age",
+        url: "https://example.com/string-hl",
+        highlights: "Single <em>highlight</em> string.",
+        age: "2 days ago",
+        score: "   ",
+      },
+      {
+        title: "Non-numeric score string",
+        url: "https://example.com/bad-score",
+        content: "Content here.",
+        published_date: "not-a-date",
+        score: "high",
+      },
+      {
+        title: "NaN numeric score",
+        url: "https://example.com/nan-score",
+        content: "More content.",
+        score: Number.NaN,
+      },
+    ];
+
+    const normalized = normalizeSearchResults(raw, "exa");
+    expect(normalized).toEqual([
+      {
+        title: "Sparse highlights",
+        url: "https://example.com/sparse",
+        snippet: "Usable highlight",
+        published_date: null,
+        score: 0.75,
+        provider: "exa",
+      },
+      {
+        title: "String highlights and unparseable age",
+        url: "https://example.com/string-hl",
+        snippet: "Single highlight string.",
+        published_date: null,
+        score: null,
+        provider: "exa",
+      },
+      {
+        title: "Non-numeric score string",
+        url: "https://example.com/bad-score",
+        snippet: "Content here.",
+        published_date: null,
+        score: null,
+        provider: "exa",
+      },
+      {
+        title: "NaN numeric score",
+        url: "https://example.com/nan-score",
+        snippet: "More content.",
+        published_date: null,
+        score: null,
+        provider: "exa",
+      },
+    ]);
+  });
+
+  it("preserves primary metadata during duplicate merging when primary already has all fields", () => {
+    const raw: RawProviderResultInput[] = [
+      {
+        title: "Primary Title",
+        url: "https://example.com/complete?utm_source=a",
+        content: "Primary snippet.",
+        published_date: "2026-05-01T00:00:00Z",
+        score: 0.9,
+      },
+      {
+        title: "Secondary Title",
+        url: "https://example.com/complete?utm_source=b",
+        content: "Secondary snippet.",
+        published_date: "2026-05-02T00:00:00Z",
+        score: 0.4,
+      },
+    ];
+
+    expect(normalizeSearchResults(raw, "tavily")).toEqual([
+      {
+        title: "Primary Title",
+        url: "https://example.com/complete",
+        snippet: "Primary snippet.",
+        published_date: "2026-05-01T00:00:00.000Z",
+        score: 0.9,
+        provider: "tavily",
+      },
+    ]);
+  });
 });

@@ -267,7 +267,6 @@ export function normalizeSearchResults(
     let mergedTitle = primary.title;
     let mergedSnippet = primary.snippet;
     let mergedPublishedDate = primary.published_date;
-    let mergedScore = primary.score;
 
     for (const candidate of group) {
       if (mergedTitle === primary.url && candidate.title !== primary.url) {
@@ -279,9 +278,6 @@ export function normalizeSearchResults(
       if (mergedPublishedDate === null && candidate.published_date !== null) {
         mergedPublishedDate = candidate.published_date;
       }
-      if (mergedScore === null && candidate.score !== null) {
-        mergedScore = candidate.score;
-      }
     }
 
     return {
@@ -289,7 +285,7 @@ export function normalizeSearchResults(
       url: primary.url,
       snippet: mergedSnippet,
       published_date: mergedPublishedDate,
-      score: mergedScore,
+      score: primary.score,
       provider: primary.provider,
     };
   });
