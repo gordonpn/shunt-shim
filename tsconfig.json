@@ -18,6 +18,7 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": ["src/**/*", "test/**/*", "scripts/**/*", "vitest.config.ts"]

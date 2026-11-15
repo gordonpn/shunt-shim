@@ -129,3 +129,15 @@ Client applications must configure non-streaming completions (`stream: false` or
 `GATEWAY_TOKENS` accepts comma-separated static bearer secrets for independent client revocation and zero-downtime rotation without privilege tiers. Multi-tenant token catalogs (`sk-proj-*`), priority tiers, context-based model switching, and shared usage counters remain deferred beyond the MVP.
 
 No KV namespace or database is provisioned. Upstream HTTP status codes (HTTP 429, HTTP 503) and connection timeouts drive bounded fallback directly.
+
+## Validate before deployment
+
+Run `just check-env` after setting `.dev.vars` or environment bindings. It uses
+the same validator as the Worker for required secrets, allowlisted model/provider
+settings, and HTTPS upstream URLs. Invalid optional values fail before deployment;
+error messages name the setting without displaying its value. `just check-secrets`
+remains the lightweight required-secret presence check for automation.
+
+Body ingestion decodes UTF-8 incrementally and counts raw bytes against the 10 MB
+limit. It does not retain a chunk array or allocate a second contiguous byte buffer;
+JSON parsing still requires the complete decoded string.

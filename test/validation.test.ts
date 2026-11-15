@@ -202,6 +202,52 @@ describe("Request Validation Specification (Subtask #17 / Story #15)", () => {
       expect(json.error.code).toBe("payload_too_large");
     });
 
+    it("decodes split UTF-8, BOM, and trailing incomplete bytes at every boundary", async () => {
+      const bytes = new TextEncoder().encode("\uFEFFhello 🌍 café 漢字");
+      for (let split = 1; split < bytes.length; split++) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes.slice(0, split));
+            controller.enqueue(bytes.slice(split));
+            controller.enqueue(new Uint8Array([0xe2, 0x82]));
+            controller.close();
+          },
+        });
+        const request = new Request("http://localhost", {
+          method: "POST",
+          body,
+          duplex: "half",
+        } as RequestInit);
+        const result = await readRequestBodyWithLimit(
+          request,
+          bytes.length + 2,
+        );
+        expect(result).toEqual({ ok: true, text: "hello 🌍 café 漢字�" });
+        expect(body.locked).toBe(false);
+      }
+    });
+
+    it("cancels oversized chunked bodies and releases the reader", async () => {
+      const cancel = vi.fn();
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(3));
+        },
+        cancel,
+      });
+      const request = new Request("http://localhost", {
+        method: "POST",
+        body,
+        duplex: "half",
+      } as RequestInit);
+      expect(await readRequestBodyWithLimit(request, 2)).toMatchObject({
+        ok: false,
+        status: 413,
+      });
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(body.locked).toBe(false);
+    });
+
     it("handles null request bodies, custom byte limits, and stream read failures", async () => {
       const nullBodyReq = new Request("http://localhost/v1/chat/completions", {
         method: "POST",

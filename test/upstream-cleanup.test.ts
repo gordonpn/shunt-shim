@@ -138,7 +138,11 @@ describe("Failed upstream response cleanup", () => {
         totalDeadlineMs: 50,
       });
       await vi.advanceTimersByTimeAsync(50);
-      expect(await operation).toMatchObject({ ok: false, status: 504 });
+      expect(await operation).toMatchObject({
+        ok: false,
+        status: 504,
+        diagnostic: { upstreamStatus: 503 },
+      });
       expect(cancel).toHaveBeenCalledOnce();
       expect(fetch).toHaveBeenCalledTimes(stage === "primary" ? 1 : 2);
     },
@@ -162,7 +166,11 @@ describe("Failed upstream response cleanup", () => {
       });
       await started.promise;
       controller.abort();
-      expect(await operation).toMatchObject({ ok: false, status: 504 });
+      expect(await operation).toMatchObject({
+        ok: false,
+        status: 504,
+        diagnostic: { upstreamStatus: 503 },
+      });
       expect(fetch).toHaveBeenCalledTimes(stage === "primary" ? 1 : 2);
     },
   );
