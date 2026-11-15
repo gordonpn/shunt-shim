@@ -26,7 +26,7 @@ Three fallback architectures were evaluated:
 1. **Fallback Architecture**:
    Adopt an **Adaptive Capability Matrix with Dynamic Circuit Breakers** for extended architecture, with a **Bounded Primary-Fallback Resolver** for the implemented MVP.
    - **Implemented MVP Resolver**: The gateway evaluates the configured primary provider (default: Groq `qwen/qwen3.8-27b`) and fallback provider (default: Google AI Studio `gemini-2.5-flash-lite`), swappable via `PRIMARY_PROVIDER`. Eligible failures triggering Attempt 2 fallback prior to downstream commitment are strictly: HTTP 429 (Too Many Requests), HTTP 503 (Service Unavailable), HTTP 530 (Cloudflare Origin/DNS error), Upstream Connect/Header Timeout (5s), and network fetch failure within the 60s total deadline. Transient 5xx codes such as HTTP 500 and 502, client validation errors (HTTP 400), and credential errors (HTTP 401/403) are ineligible for fallback.
-   - **Post-MVP Circuit Breaker**: Dynamic circuit breakers with isolate-local memory and canary probing will govern multi-turn and multi-provider pools.
+   - **Post-MVP Circuit Breaker & Ordered Provider Chain**: Dynamic circuit breakers with isolate-local memory and canary probing will govern multi-turn and multi-provider pools, alongside an explicit configurable fallback order (`FALLBACK_ORDER`) that places free-tier providers (`groq`, `gemini`) ahead of an optional last-resort `deepseek` paid credit tier (`DEEPSEEK_API_KEY`).
 
 2. **State Management and Evolution**:
    - **Implemented MVP**: Stateless execution within Cloudflare Workers isolates; bounded one-attempt failover on eligible upstream failures without cross-request state dependencies.
