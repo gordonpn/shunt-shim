@@ -27,6 +27,8 @@ echo "Production deployed successfully: ${DEPLOY_URL}"
 verify_custom_domain() {
   local attempts="${CUSTOM_DOMAIN_VERIFY_ATTEMPTS:-6}"
   local delay="${CUSTOM_DOMAIN_VERIFY_DELAY_SECONDS:-5}"
+  local budget="${CUSTOM_DOMAIN_VERIFY_BUDGET_SECONDS:-90}"
+  local deadline=$((SECONDS + budget))
   local attempt=1
 
   if [ "$attempts" -lt 1 ]; then
@@ -37,7 +39,8 @@ verify_custom_domain() {
     if just verify-ingress "https://shunt-shim.gordon-pn.com"; then
       return 0
     fi
-    if [ "$attempt" -ge "$attempts" ]; then
+    local remaining=$((deadline - SECONDS))
+    if [ "$attempt" -ge "$attempts" ] || [ "$remaining" -le "$delay" ] || [ "$remaining" -le 0 ]; then
       return 1
     fi
     echo "Custom domain ingress check failed (attempt ${attempt}/${attempts}); retrying in ${delay}s..." >&2

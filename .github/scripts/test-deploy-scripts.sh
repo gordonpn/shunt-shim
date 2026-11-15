@@ -343,6 +343,25 @@ if [ "$(grep -c '^verify-ingress https://shunt-shim\.gordon-pn\.com$' "$MOCK_LOG
   exit 1
 fi
 
+# Budget exhaustion stops custom-domain retries cleanly so rollback can proceed.
+: > "$MOCK_LOG"
+set +e
+output=$(env -i PATH="$MOCK_BIN:$PATH" MOCK_LOG="$MOCK_LOG" \
+  CLOUDFLARE_API_TOKEN="dummy-token" CLOUDFLARE_ACCOUNT_ID="dummy-account" \
+  FAIL_CUSTOM_DOMAIN=true CUSTOM_DOMAIN_VERIFY_ATTEMPTS=6 \
+  CUSTOM_DOMAIN_VERIFY_DELAY_SECONDS=0 CUSTOM_DOMAIN_VERIFY_BUDGET_SECONDS=0 \
+  bash "$REPO_ROOT/.github/scripts/deploy-production.sh" 2>&1)
+status=$?
+set -e
+if [ "$status" -eq 0 ] || ! grep -q '^rollback$' "$MOCK_LOG"; then
+  echo "Expected exhausted budget to stop retrying and trigger rollback: $output" >&2
+  exit 1
+fi
+if [ "$(grep -c '^verify-ingress https://shunt-shim\.gordon-pn\.com$' "$MOCK_LOG")" -ne 2 ]; then
+  echo "Expected 1 pre-rollback attempt + 1 post-rollback check when budget=0: $(cat "$MOCK_LOG")" >&2
+  exit 1
+fi
+
 # Custom-domain failure must fail the release even when workers.dev is healthy.
 for recovery in false true; do
   : > "$MOCK_LOG"
