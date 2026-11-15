@@ -83,18 +83,50 @@ schema.
 
 Continuous deployment runs via `.github/workflows/deploy.yml`. It requires `package.json`, `pnpm-lock.yaml`, and `wrangler.jsonc` before initiating deployment jobs.
 
-### Required repository secrets
+### Separate preview and production credentials
 
-Configure the following secrets in repository settings:
-- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with `Workers Scripts: Edit` and `Account Settings: Read` permissions.
-- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account identifier.
-- `GATEWAY_TOKENS` (optional): Gateway bearer token for running all 11 authenticated ingress conformance probes after deployment. When omitted, the verifier runs the 5 unauthenticated health and error contract probes.
+Production uses the `production` GitHub environment. Restrict that environment
+with a deployment branch policy allowing only `main`, then configure these
+**environment secrets**, never repository secrets:
+- `CLOUDFLARE_PRODUCTION_API_TOKEN`: Account `Workers Scripts: Edit` and `Account Settings: Read`; Zone `gordon-pn.com` `Zone: Read`, `Workers Routes: Edit`, and `DNS: Edit` for Custom Domain provisioning.
+- `CLOUDFLARE_PRODUCTION_ACCOUNT_ID`: Production account identifier.
+- `PRODUCTION_GATEWAY_TOKENS`: Production gateway bearer token for all 11 authenticated probes; omission runs only 5 unauthenticated probes and is not full acceptance evidence.
 
-When credentials are not configured or on external fork pull requests, deployment jobs skip safely without failing CI checks or exposing secrets.
+Optional same-repository PR previews use separate repository secrets:
+- `CLOUDFLARE_PREVIEW_API_TOKEN`: Workers-only token with no production account or zone permissions.
+- `CLOUDFLARE_PREVIEW_ACCOUNT_ID`: A dedicated non-production Cloudflare account.
+- `PREVIEW_GATEWAY_TOKENS`: A preview-only bearer token; never the production token.
 
-### Synchronize repository secrets from a local checkout
+PR code can read preview credentials. The dedicated account must contain no
+production services, data, credentials, or bindings. Do not reuse the
+zone-provisioning token for previews. Forks and previews without both preview
+Cloudflare credentials skip deployment; ordinary CI checks still run.
 
-Install GitHub CLI (`gh`) and authenticate with `gh auth login` using an account
+Before enabling preview secrets, bootstrap `shunt-shim` in the preview account
+from trusted code, with a preview-only config that has no production domain
+routes, and provision dummy upstream provider keys so previews never consume
+live free-tier quota. `wrangler versions upload` requires an existing Worker; PR
+automation must not bootstrap production or modify production DNS to repair that
+prerequisite. Standard preview ingress verification (`just verify-ingress`,
+Probes 1-11) runs without `--live` and makes no upstream provider requests; if
+testing completions against a preview Worker, override `GROQ_BASE_URL` and
+`GEMINI_BASE_URL` to point to an `https://` mock responder instead of live
+provider APIs.
+
+Migration requires operator action: rotate and remove the legacy repository
+`CLOUDFLARE_API_TOKEN` and production `GATEWAY_TOKENS` after provisioning the
+restricted environment. Merely renaming workflow references does not revoke
+repository secrets accessible to PR workflows. No live deployment or secret
+migration is claimed by this PR.
+
+### Legacy repository secret synchronization
+
+The existing `just sync-github-secrets` helper writes legacy repository secrets;
+**do not use it with production credentials**. It does not configure the new
+production environment or preview secrets. Provision those through GitHub
+environment/repository settings as described above.
+
+For the legacy helper, install GitHub CLI (`gh`) and authenticate with `gh auth login` using an account
 with permission to manage this repository's Actions secrets. In the repository
 root, copy `.env.example` to `.dev.vars` if needed, then set
 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `GATEWAY_TOKENS` there.
@@ -127,7 +159,7 @@ failure. It also runs in `just check-workflows` without credentials or network.
 
 ### Pull request preview deployments
 
-For pull requests originating from the same repository, the workflow uploads an isolated Worker Version with `preview_urls: true` and alias `pr-<number>` (`just deploy-preview-ci <number>`). This exposes a deterministic preview URL (such as `https://pr-<id>-shunt-shim.<subdomain>.workers.dev`) without altering active production traffic. Post-deployment ingress verification runs against the preview URL. Concurrency group `deploy-preview-<number>` with `cancel-in-progress: true` automatically cancels superseded in-flight uploads.
+For pull requests originating from the same repository with the separate preview credentials and an existing preview Worker, the workflow uploads an isolated Worker Version with `preview_urls: true` and alias `pr-<number>` (`just deploy-preview-ci <number>`). This exposes a deterministic preview URL (such as `https://pr-<id>-shunt-shim.<subdomain>.workers.dev`) without altering active production traffic. Post-deployment ingress verification runs against the preview URL. Concurrency group `deploy-preview-<number>` with `cancel-in-progress: true` automatically cancels superseded in-flight uploads.
 
 #### Preview URL lifecycle and retention
 
@@ -137,7 +169,9 @@ Preview deployments are version-bound endpoints generated by Cloudflare `wrangle
 
 ### Production deployments and automated rollback
 
-Pushes to the `main` branch trigger production deployment (`just deploy-production-ci`). The workflow runs local quality gates (formatting, linting, typechecking, tests, build) before deploying via `just deploy`. It then runs `just verify-ingress` against the deployed production endpoint. If post-deployment ingress verification fails, `just rollback` restores the prior working Worker version immediately and the job exits non-zero. Concurrency group `deploy-production` with `cancel-in-progress: false` serializes production releases.
+Pushes to the `main` branch trigger production deployment (`just deploy-production-ci`). The workflow runs local quality gates (formatting, linting, typechecking, tests, build) before deploying via `just deploy`. It then runs `just verify-ingress` against both the deployed `workers.dev` endpoint and `https://shunt-shim.gordon-pn.com`. Both must pass; DNS or TLS propagation delays fail verification. After rollback, both endpoints are checked again. A Worker-version rollback may not repair DNS, route, or certificate configuration; persistent failures require operator intervention. If post-deployment ingress verification fails, `just rollback` restores the prior working Worker version immediately and the job exits non-zero. Concurrency group `deploy-production` with `cancel-in-progress: false` serializes production releases.
+
+`wrangler.jsonc` also configures a Cloudflare Workers Custom Domain (`shunt-shim.gordon-pn.com`) alongside `workers.dev` and `preview_urls: true`. On deploy, Cloudflare automatically provisions the DNS record and TLS certificate on the active `gordon-pn.com` zone without affecting PR preview URLs. Verify the custom domain directly with `just verify-ingress https://shunt-shim.gordon-pn.com`.
 
 ## Deployment acceptance evidence
 
