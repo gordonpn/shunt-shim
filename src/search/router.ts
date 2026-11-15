@@ -1,8 +1,11 @@
 import { type ApiError, createErrorResponse } from "../errors.js";
 import type { GatewayEnv } from "../index.js";
 import {
+  classifyHttpStatusToReason,
   createSearchHttpError,
+  getDefaultStatusForSearchReason,
   isEligibleSearchFallbackError,
+  isSearchErrorReason,
   SearchClientAbortError,
   type SearchErrorReason,
   SearchExecutionError,
@@ -467,16 +470,9 @@ export async function dispatchSearchWithTimeout(
   let onAbort: (() => void) | undefined;
   const abortPromise = new Promise<never>((_, reject) => {
     onAbort = () => {
-      reject(
-        combinedSignal.reason ??
-          new DOMException("The operation was aborted", "AbortError"),
-      );
+      reject(combinedSignal.reason);
     };
-    if (combinedSignal.aborted) {
-      onAbort();
-    } else {
-      combinedSignal.addEventListener("abort", onAbort, { once: true });
-    }
+    combinedSignal.addEventListener("abort", onAbort, { once: true });
   });
 
   try {
@@ -485,17 +481,7 @@ export async function dispatchSearchWithTimeout(
     );
     searchPromise.catch(() => undefined);
 
-    const response = await Promise.race([searchPromise, abortPromise]);
-
-    if (clientSignal?.aborted) {
-      throw new SearchClientAbortError(
-        "Client closed request during search dispatch",
-        provider.id,
-        clientSignal.reason,
-      );
-    }
-
-    return response;
+    return await Promise.race([searchPromise, abortPromise]);
   } catch (err) {
     if (
       clientSignal?.aborted ||
@@ -527,37 +513,53 @@ export async function dispatchSearchWithTimeout(
           );
     }
 
-    if (err instanceof SearchExecutionError) {
-      throw err;
-    }
-
-    if (err instanceof TypeError) {
-      throw new SearchExecutionError(
-        err.message || `Network failure while querying '${provider.id}'`,
-        {
-          reason: "network_error",
-          provider: provider.id,
-          cause: err,
-        },
-      );
-    }
-
-    const message =
-      err instanceof Error
-        ? err.message
-        : `Unexpected search failure from '${provider.id}'`;
-    throw new SearchExecutionError(message, {
-      status: 502,
-      reason: "upstream_unavailable",
-      provider: provider.id,
-      cause: err,
-    });
+    throw toSearchExecutionError(err, provider.id);
   } finally {
     clearTimeout(timer);
     if (onAbort) {
       combinedSignal.removeEventListener("abort", onAbort);
     }
   }
+}
+
+function classifyErrorMessage(
+  message: string,
+  providerId: string,
+  cause: unknown,
+): SearchExecutionError | undefined {
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes("quarantine")) {
+    return new SearchExecutionError(message, {
+      status: 403,
+      reason: "policy_quarantine",
+      provider: providerId,
+      cause,
+    });
+  }
+  if (
+    lowerMessage.includes("client closed") ||
+    lowerMessage.includes("client cancelled") ||
+    lowerMessage.includes("client canceled")
+  ) {
+    return new SearchClientAbortError(message, providerId, cause);
+  }
+  if (lowerMessage.includes("timeout") || lowerMessage.includes("timed out")) {
+    return new SearchTimeoutError(message, providerId, cause);
+  }
+  if (
+    lowerMessage.includes("network") ||
+    lowerMessage.includes("fetch failed") ||
+    lowerMessage.includes("econnrefused") ||
+    lowerMessage.includes("enotfound") ||
+    lowerMessage.includes("socket hang up")
+  ) {
+    return new SearchExecutionError(message, {
+      reason: "network_error",
+      provider: providerId,
+      cause,
+    });
+  }
+  return undefined;
 }
 
 function toSearchExecutionError(
@@ -567,6 +569,7 @@ function toSearchExecutionError(
   if (err instanceof SearchExecutionError) {
     return err;
   }
+
   if (err instanceof TypeError) {
     return new SearchExecutionError(
       err.message || `Network failure while querying '${providerId}'`,
@@ -577,8 +580,67 @@ function toSearchExecutionError(
       },
     );
   }
+
+  if (typeof err === "object" && err !== null) {
+    const record = err as Record<string, unknown>;
+    const message =
+      typeof record.message === "string" && record.message.length > 0
+        ? record.message
+        : `Unexpected search failure from '${providerId}'`;
+    const retryAfter =
+      typeof record.retryAfter === "string" && record.retryAfter.length > 0
+        ? record.retryAfter
+        : undefined;
+    const status =
+      typeof record.status === "number" ? record.status : undefined;
+
+    if (
+      record.isClientAbort === true ||
+      record.reason === "client_cancelled" ||
+      record.name === "AbortError"
+    ) {
+      return new SearchClientAbortError(message, providerId, err);
+    }
+
+    if (record.name === "TimeoutError") {
+      return new SearchTimeoutError(message, providerId, err);
+    }
+
+    if (isSearchErrorReason(record.reason)) {
+      if (record.reason === "upstream_timeout") {
+        return new SearchTimeoutError(message, providerId, err);
+      }
+      return new SearchExecutionError(message, {
+        status: status ?? getDefaultStatusForSearchReason(record.reason),
+        reason: record.reason,
+        provider: providerId,
+        retryAfter,
+        cause: err,
+      });
+    }
+
+    if (status !== undefined) {
+      return new SearchExecutionError(message, {
+        status,
+        reason: classifyHttpStatusToReason(status),
+        provider: providerId,
+        retryAfter,
+        cause: err,
+      });
+    }
+
+    if (err instanceof Error) {
+      const classified = classifyErrorMessage(err.message, providerId, err);
+      if (classified) {
+        return classified;
+      }
+    }
+  }
+
   const message =
-    err instanceof Error ? err.message : "Upstream search provider error";
+    err instanceof Error && err.message.length > 0
+      ? err.message
+      : `Unexpected search failure from '${providerId}'`;
   return new SearchExecutionError(message, {
     status: 502,
     reason: "upstream_unavailable",
@@ -601,6 +663,48 @@ export function filterEligibleSearchProviders(
   return providers.filter((provider) => provider.requiresCreditCard !== true);
 }
 
+function buildSearchDiagnostic(
+  providerId: string | undefined,
+  attempts: number,
+  firstFailureReason: SearchErrorReason | undefined,
+): SearchDiagnosticMetadata {
+  return {
+    ...(providerId !== undefined ? { provider: providerId } : {}),
+    attempts,
+    fallbackOccurred: attempts > 1,
+    ...(firstFailureReason !== undefined
+      ? { fallbackReason: firstFailureReason }
+      : {}),
+  };
+}
+
+function createClientAbortRouteResult(
+  diagnostic: SearchDiagnosticMetadata,
+): SearchRouteResult {
+  return {
+    ok: false,
+    status: 504,
+    error: createErrorResponse(
+      "Client closed request or operation timed out",
+      "api_error",
+      "gateway_timeout",
+    ),
+    diagnostic,
+  };
+}
+
+function createDeadlineExceededResult(
+  diagnostic: SearchDiagnosticMetadata,
+  message = "Total search request deadline exceeded",
+): SearchRouteResult {
+  return {
+    ok: false,
+    status: 504,
+    error: createErrorResponse(message, "api_error", "gateway_timeout"),
+    diagnostic,
+  };
+}
+
 /**
  * Routes a search request sequentially across eligible providers with a 5s per-attempt
  * connection timeout and a 30s total wall-clock deadline.
@@ -613,19 +717,10 @@ export async function routeSearchRequest(
 ): Promise<SearchRouteResult> {
   const clientSignal = options?.clientSignal ?? options?.signal;
   if (clientSignal?.aborted) {
-    return {
-      ok: false,
-      status: 504,
-      error: createErrorResponse(
-        "Client closed request or operation timed out",
-        "api_error",
-        "gateway_timeout",
-      ),
-      diagnostic: {
-        attempts: 0,
-        fallbackOccurred: false,
-      },
-    };
+    return createClientAbortRouteResult({
+      attempts: 0,
+      fallbackOccurred: false,
+    });
   }
 
   const candidateProviders = providers ?? createDefaultSearchProviders(env);
@@ -674,56 +769,13 @@ export async function routeSearchRequest(
   let lastRetryAfter: string | undefined;
 
   try {
-    for (let index = 0; index < eligibleProviders.length; index++) {
-      const provider = eligibleProviders[index];
-      if (!provider) {
-        continue;
-      }
-
-      if (clientSignal?.aborted) {
-        return {
-          ok: false,
-          status: 504,
-          error: createErrorResponse(
-            "Client closed request or operation timed out",
-            "api_error",
-            "gateway_timeout",
-          ),
-          diagnostic: {
-            ...(lastProviderId !== undefined
-              ? { provider: lastProviderId }
-              : {}),
-            attempts,
-            fallbackOccurred: attempts > 1,
-            ...(firstFailureReason !== undefined
-              ? { fallbackReason: firstFailureReason }
-              : {}),
-          },
-        };
-      }
-
+    for (const provider of eligibleProviders) {
       const elapsedMs = now() - startTime;
       const remainingMs = totalDeadlineMs - elapsedMs;
       if (remainingMs <= 0 || deadlineController.signal.aborted) {
-        return {
-          ok: false,
-          status: 504,
-          error: createErrorResponse(
-            "Total search request deadline exceeded",
-            "api_error",
-            "gateway_timeout",
-          ),
-          diagnostic: {
-            ...(lastProviderId !== undefined
-              ? { provider: lastProviderId }
-              : {}),
-            attempts,
-            fallbackOccurred: attempts > 1,
-            ...(firstFailureReason !== undefined
-              ? { fallbackReason: firstFailureReason }
-              : {}),
-          },
-        };
+        return createDeadlineExceededResult(
+          buildSearchDiagnostic(lastProviderId, attempts, firstFailureReason),
+        );
       }
 
       const attemptTimeoutMs = Math.max(
@@ -744,6 +796,15 @@ export async function routeSearchRequest(
             connectTimeoutMs: attemptTimeoutMs,
           },
         );
+
+        if (
+          deadlineController.signal.aborted ||
+          now() - startTime >= totalDeadlineMs
+        ) {
+          return createDeadlineExceededResult(
+            buildSearchDiagnostic(lastProviderId, attempts, firstFailureReason),
+          );
+        }
 
         const fallbackOccurred = attempts > 1;
         const responseId =
@@ -791,15 +852,11 @@ export async function routeSearchRequest(
       }
     }
 
-    const fallbackOccurred = attempts > 1;
-    const diagnostic: SearchDiagnosticMetadata = {
-      ...(lastProviderId !== undefined ? { provider: lastProviderId } : {}),
+    const diagnostic = buildSearchDiagnostic(
+      lastProviderId,
       attempts,
-      fallbackOccurred,
-      ...(firstFailureReason !== undefined
-        ? { fallbackReason: firstFailureReason }
-        : {}),
-    };
+      firstFailureReason,
+    );
 
     if (
       clientSignal?.aborted ||
@@ -807,16 +864,7 @@ export async function routeSearchRequest(
       lastError?.isClientAbort === true ||
       lastError?.reason === "client_cancelled"
     ) {
-      return {
-        ok: false,
-        status: 504,
-        error: createErrorResponse(
-          "Client closed request or operation timed out",
-          "api_error",
-          "gateway_timeout",
-        ),
-        diagnostic,
-      };
+      return createClientAbortRouteResult(diagnostic);
     }
 
     if (lastError?.status === 400 || lastError?.reason === "bad_request") {
@@ -873,18 +921,12 @@ export async function routeSearchRequest(
       lastError?.reason === "upstream_timeout" ||
       lastError?.status === 504
     ) {
-      return {
-        ok: false,
-        status: 504,
-        error: createErrorResponse(
-          isDeadlineExpired
-            ? "Total search request deadline exceeded"
-            : "All upstream search providers timed out",
-          "api_error",
-          "gateway_timeout",
-        ),
+      return createDeadlineExceededResult(
         diagnostic,
-      };
+        isDeadlineExpired
+          ? "Total search request deadline exceeded"
+          : "All upstream search providers timed out",
+      );
     }
 
     if (
@@ -942,14 +984,14 @@ export async function routeSearchRequest(
  * Stateful sequential search router with configurable provider priority and timeouts.
  */
 export class SearchRouter {
-  private readonly providers: readonly SearchProvider[];
+  private readonly providers: readonly SearchProvider[] | undefined;
   private readonly defaultOptions: SearchRouterOptions | undefined;
 
   constructor(
     providers?: readonly SearchProvider[],
     defaultOptions?: SearchRouterOptions,
   ) {
-    this.providers = providers ?? createDefaultSearchProviders();
+    this.providers = providers;
     this.defaultOptions = defaultOptions;
   }
 

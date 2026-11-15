@@ -124,6 +124,43 @@ const TERMINAL_REASONS = new Set<SearchErrorReason>([
 const ELIGIBLE_HTTP_STATUSES = new Set<number>([402, 429, 500, 502, 503, 504]);
 const TERMINAL_HTTP_STATUSES = new Set<number>([400, 401, 403]);
 
+const DEFAULT_STATUS_BY_REASON: Record<SearchErrorReason, number | undefined> =
+  {
+    rate_limit_exceeded: 429,
+    quota_exceeded: 402,
+    upstream_unavailable: 502,
+    upstream_timeout: 504,
+    network_error: undefined,
+    invalid_upstream_response: 502,
+    bad_request: 400,
+    unauthorized: 401,
+    forbidden: 403,
+    policy_quarantine: 403,
+    client_cancelled: 504,
+  };
+
+/**
+ * Checks whether a runtime value is a recognized SearchErrorReason.
+ */
+export function isSearchErrorReason(
+  value: unknown,
+): value is SearchErrorReason {
+  return (
+    typeof value === "string" &&
+    (ELIGIBLE_REASONS.has(value as SearchErrorReason) ||
+      TERMINAL_REASONS.has(value as SearchErrorReason))
+  );
+}
+
+/**
+ * Returns the default HTTP status code associated with a SearchErrorReason, if any.
+ */
+export function getDefaultStatusForSearchReason(
+  reason: SearchErrorReason,
+): number | undefined {
+  return DEFAULT_STATUS_BY_REASON[reason];
+}
+
 /**
  * Maps an upstream HTTP status code to a normalized SearchErrorReason.
  */
