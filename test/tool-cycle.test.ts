@@ -296,6 +296,132 @@ describe("JSON Tool Cycle Specification (Subtask #22 / Story #20)", () => {
       };
       expect(calledBody.model).toBe("gemini-2.5-flash-lite");
     });
+
+    it("handles multi-tool simultaneous calls with matching tool results and usage on Gemini", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(geminiFixtures.multiToolCall), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(geminiFixtures.finalAnswer), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+
+      const firstRes = await postChat(
+        {
+          model: "fast",
+          messages: [
+            { role: "user", content: "Read README and check status." },
+          ],
+          tools: createMultiTestToolDeclarations(),
+        },
+        geminiEnv,
+      );
+      expect(firstRes.status).toBe(200);
+      const firstJson =
+        (await firstRes.json()) as typeof geminiFixtures.multiToolCall;
+      const firstChoice = requireDefined(firstJson.choices[0]);
+      expect(firstChoice.finish_reason).toBe("tool_calls");
+      expect(firstChoice.message.content).toBeNull();
+      expect(firstJson.usage).toEqual(geminiFixtures.multiToolCall.usage);
+      const toolCalls = requireDefined(firstChoice.message.tool_calls);
+      expect(toolCalls).toHaveLength(2);
+      expect(requireDefined(toolCalls[0]).id).toBe(
+        "function-call-gemini-multi-001",
+      );
+      expect(requireDefined(toolCalls[1]).id).toBe(
+        "function-call-gemini-multi-002",
+      );
+
+      const secondRes = await postChat(
+        {
+          model: "fast",
+          messages: [
+            { role: "user", content: "Read README and check status." },
+            firstChoice.message,
+            {
+              role: "tool",
+              tool_call_id: "function-call-gemini-multi-001",
+              content: "# shunt-shim",
+            },
+            {
+              role: "tool",
+              tool_call_id: "function-call-gemini-multi-002",
+              content: "clean",
+            },
+          ],
+          tools: createMultiTestToolDeclarations(),
+        },
+        geminiEnv,
+      );
+      expect(secondRes.status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(["length", "content_filter"] as const)(
+      "preserves finish_reason '%s', usage, and optional reasoning_content on Gemini",
+      async (finishReason) => {
+        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              ...geminiFixtures.textCompletion,
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: "assistant",
+                    content: "Gemini output",
+                    reasoning_content: "Gemini reasoning",
+                  },
+                  finish_reason: finishReason,
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+
+        const res = await postChat(
+          { model: "fast", messages: [{ role: "user", content: "Hi" }] },
+          geminiEnv,
+        );
+        expect(res.status).toBe(200);
+        const json = (await res.json()) as {
+          choices: Array<{
+            finish_reason: string;
+            message: { content: string; reasoning_content?: string };
+          }>;
+          usage?: unknown;
+        };
+        const choice = requireDefined(json.choices[0]);
+        expect(choice.finish_reason).toBe(finishReason);
+        expect(choice.message.reasoning_content).toBe("Gemini reasoning");
+        expect(json.usage).toEqual(geminiFixtures.textCompletion.usage);
+      },
+    );
+
+    it("maps malformed 200 Gemini response missing choices to HTTP 502 bad_gateway", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "bad", object: "chat.completion" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+      const res = await postChat(
+        { model: "fast", messages: [{ role: "user", content: "Hi" }] },
+        geminiEnv,
+      );
+      expect(res.status).toBe(502);
+      const json = (await res.json()) as { error: { code: string } };
+      expect(json.error.code).toBe("bad_gateway");
+    });
   });
 
   describe("Finish Reason Preservation & Protocol Truthfulness", () => {
