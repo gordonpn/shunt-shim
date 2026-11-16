@@ -30,6 +30,31 @@ describe("sanitizeSnippet", () => {
     );
   });
 
+  it("preserves relative code indentation while trimming trailing spaces and normalizing common indent", () => {
+    const nestedCode = [
+      "    function add(a: number, b: number) {  ",
+      "\t\t\tif (a > 0) {\t",
+      "        return   a   +  b;",
+      "",
+      "      }",
+      "    }",
+    ].join("\n");
+    expect(sanitizeSnippet(nestedCode)).toBe(
+      [
+        "function add(a: number, b: number) {",
+        "  if (a > 0) {",
+        "    return a + b;",
+        "",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+
+    expect(sanitizeSnippet("   hello   world   ")).toBe("hello world");
+    expect(sanitizeSnippet("\n\n   only blanks \n   \n")).toBe("only blanks");
+    expect(sanitizeSnippet("   \n\t  \n  ")).toBe("");
+  });
+
   it("clamps snippets to 500 characters and 1,000 characters with ellipsis when truncated", () => {
     const longInput = "a".repeat(1250);
 

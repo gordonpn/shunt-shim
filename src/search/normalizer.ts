@@ -75,11 +75,26 @@ function stripControlCharacters(input: string): string {
   return result;
 }
 
+function normalizeSnippetLine(line: string): string {
+  const trimmedEnd = line.trimEnd();
+  if (trimmedEnd.length === 0) {
+    return "";
+  }
+  const trimmedStart = trimmedEnd.trimStart();
+  const rawIndent = trimmedEnd.slice(
+    0,
+    trimmedEnd.length - trimmedStart.length,
+  );
+  const indent = rawIndent.replace(/\t/g, "  ");
+  const content = trimmedStart.replace(/[ \t]+/g, " ");
+  return `${indent}${content}`;
+}
+
 /**
  * Sanitizes raw snippet text by removing null bytes and ASCII control
  * characters, stripping HTML highlight/formatting tags, normalizing vertical
- * and horizontal whitespace while preserving code tokens, and clamping to
- * `maxChars` with an `"..."` ellipsis when truncated.
+ * and horizontal whitespace while preserving code tokens and indentation, and
+ * clamping to `maxChars` with an `"..."` ellipsis when truncated.
  */
 export function sanitizeSnippet(
   rawText: string | null | undefined,
@@ -95,15 +110,32 @@ export function sanitizeSnippet(
     "",
   );
   const normalizedNewlines = withoutHighlightTags.replace(/\r\n?/g, "\n");
-
   const normalizedLines = normalizedNewlines
     .split("\n")
-    .map((line) => line.replace(/[ \t]+/g, " ").trim());
+    .map(normalizeSnippetLine);
 
-  const collapsedWhitespace = normalizedLines
+  let minIndent = Number.POSITIVE_INFINITY;
+  for (const line of normalizedLines) {
+    if (line.length === 0) {
+      continue;
+    }
+    const leadingSpaces = line.length - line.trimStart().length;
+    if (leadingSpaces < minIndent) {
+      minIndent = leadingSpaces;
+    }
+  }
+
+  const dedentedLines =
+    Number.isFinite(minIndent) && minIndent > 0
+      ? normalizedLines.map((line) =>
+          line.length > 0 ? line.slice(minIndent) : "",
+        )
+      : normalizedLines;
+
+  const collapsedWhitespace = dedentedLines
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/^\n+|\n+$/g, "");
 
   if (collapsedWhitespace.length <= maxChars) {
     return collapsedWhitespace;
