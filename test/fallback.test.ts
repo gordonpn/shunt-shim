@@ -172,6 +172,14 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
           ),
       },
       {
+        description: "HTTP 530 Origin DNS Error",
+        mockResponse: () =>
+          new Response("error code: 1016", {
+            status: 530,
+            headers: { "Content-Type": "text/plain" },
+          }),
+      },
+      {
         description: "Network error / connect timeout",
         mockResponse: () => {
           throw new TypeError("fetch failed: connect timeout");
@@ -464,6 +472,22 @@ describe("Bounded Fallback Specification (Subtask #30 / Story #28)", () => {
 
       expect(res.status).toBe(503);
       expect(body.error.code).toBe("service_unavailable");
+      expect(calls.length).toBe(2);
+    });
+
+    it("returns HTTP 502 when both Groq and Gemini return HTTP 530", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response("Groq origin DNS error", { status: 530 });
+        }
+        return new Response("Gemini origin DNS error", { status: 530 });
+      });
+
+      const res = await postChat();
+      const body = (await res.json()) as ApiError;
+
+      expect(res.status).toBe(502);
+      expect(body.error.code).toBe("bad_gateway");
       expect(calls.length).toBe(2);
     });
 

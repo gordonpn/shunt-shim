@@ -264,6 +264,29 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
       expect(record.fallbackReason).toBe("service_unavailable");
     });
 
+    it("emits fallback reason on primary HTTP 530 and records Gemini on fallback success", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response(`error code: 1016 ${SECRET_ERROR_LEAK}`, {
+            status: 530,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        return Response.json(geminiFixtures.textCompletion);
+      });
+
+      const res = await postChat();
+      expect(res.status).toBe(200);
+
+      expect(capturedRecords.length).toBe(1);
+      const record = requireDefined(capturedRecords[0]);
+      expect(record.status).toBe(200);
+      expect(record.provider).toBe("gemini");
+      expect(record.model).toBe("gemini-2.5-flash-lite");
+      expect(record.attempts).toBe(2);
+      expect(record.fallbackReason).toBe("origin_dns_error");
+    });
+
     it("emits fallback reason on primary connect timeout", async () => {
       captureFetch(async (url) => {
         if (isGroqRequest(url)) {
