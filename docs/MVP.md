@@ -216,7 +216,7 @@ Phase 1 restricts live search dispatch to providers that can operate under a str
 
 - **Tavily (`tavily`, primary candidate)**:
   - **Free-tier allowance**: 1,000 free API credits per month on the Researcher plan (`1` credit for `basic` search depth, `2` credits for `advanced` search depth).
-  - **Financial boundary**: Does not require a credit card at signup; enforces an upstream hard stop (HTTP 429 or HTTP 432) when monthly credits are exhausted unless pay-as-you-go is manually enabled.
+  - **Financial boundary**: Does not require a credit card at signup; enforces an upstream hard stop (HTTP 432 plan limit) when monthly credits are exhausted unless pay-as-you-go is manually enabled. HTTP 429 is a retryable rate limit and is not evidence of monthly exhaustion.
   - **Selection rationale**: Predictable per-query credit cost, purpose-built search snippet output for coding and research workflows, and zero-card signup make Tavily the safest primary provider for Phase 1.
 - **Exa (`exa`, secondary fallback candidate)**:
   - **Free-tier allowance**: $10 in recurring monthly free credits with a calendar reset.
