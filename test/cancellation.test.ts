@@ -255,6 +255,59 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
 
       expect([499, 504]).toContain(res.status);
     });
+
+    it("does not trigger fallback when primary 200 body parsing rejects after client disconnect", async () => {
+      const clientController = new AbortController();
+
+      captureFetch(async () => {
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            clientController.abort();
+            controller.error(new DOMException("Aborted", "AbortError"));
+          },
+        });
+        return new Response(body, { status: 200 });
+      });
+
+      const res = await postChatWithSignal(
+        {
+          model: "fast",
+          messages: [{ role: "user", content: "hello" }],
+        },
+        clientController.signal,
+      );
+
+      expect(calls.length).toBe(1);
+      expect([499, 502, 504]).toContain(res.status);
+    });
+
+    it("makes no third attempt when fallback 200 body parsing rejects after client disconnect", async () => {
+      const clientController = new AbortController();
+
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response("Groq rate limited", { status: 429 });
+        }
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            clientController.abort();
+            controller.error(new DOMException("Aborted", "AbortError"));
+          },
+        });
+        return new Response(body, { status: 200 });
+      });
+
+      const res = await postChatWithSignal(
+        {
+          model: "fast",
+          messages: [{ role: "user", content: "hello" }],
+        },
+        clientController.signal,
+      );
+
+      expect(calls.length).toBe(2);
+      expect([499, 502, 504]).toContain(res.status);
+    });
   });
 
   describe("Upstream Connect Timeout (5,000 ms)", () => {
