@@ -6,10 +6,6 @@ on:
   issue_comment:
     types: [created, edited]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   pull-requests: write
@@ -19,6 +15,9 @@ jobs:
     name: runner / deepseek-review
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+      cancel-in-progress: true
     if: |
       github.event.sender.type != 'Bot' &&
       github.actor != 'dependabot[bot]' &&
