@@ -169,24 +169,31 @@ provider bodies under Shunt Shim's stricter metadata-only privacy contract.
 
 ## Compatibility and failure cases to retain or add
 
-These are proposed contract cases, not tests implemented or run by this research.
+Statements about Shunt Shim are pinned to `main` at
+[`b5a3e96`](https://github.com/gordonpn/shunt-shim/commit/b5a3e96), checked in
+[upstream.ts](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/src/upstream.ts)
+and the tests linked below. At that revision a primary failure is eligible for
+fallback on HTTP 413 (added by [#226](https://github.com/gordonpn/shunt-shim/pull/226)),
+429, 503, 530, connect/header timeout or network failure. Both attempts use the
+5-second connect/header cap; open PR [#228](https://github.com/gordonpn/shunt-shim/pull/228)
+would bound only the fallback attempt by the remaining total deadline.
 
-| Scenario | Required Shunt Shim observation |
-| :--- | :--- |
-| Parallel tool calls reuse function names but have distinct IDs; results arrive across turns | Associate by valid call ID, preserve arguments/results, reject orphan or duplicate-invalid structures before dispatch. |
-| Tool-only, length-limited, filtered or missing-usage response | Preserve permitted null content/finish reasons and optional usage; reject malformed core output with 502. |
-| Unknown reasoning/vendor extras collide with model or auth fields | Only approved mappings survive; validated routing and secrets cannot be overwritten. |
-| Unsupported image/audio/video, Responses or streaming request | Follow the explicit current request/path contract before contacting a provider; do not silently drop unsupported core input. |
-| Primary 429/503/network/header timeout, then fallback succeeds | Exactly two attempts at most, no retry round or same-account replay. |
-| Primary 400/401/403 or malformed successful output | No fallback outside the existing eligible categories; retain explicit validation/auth/protocol failure classification. |
-| Both 429; both unavailable; mixed eligible errors | Preserve quota vs unavailable distinction and the existing final-attempt error/header policy. |
-| Large or malformed Retry-After and sensitive upstream error headers/body | Only validated safe retry metadata escapes; no raw payload or secret reaches diagnostics. |
-| Deadline or client abort between selection and fallback | Cancel in-flight work and make no new attempt; total wall time remains bounded. |
-| Headers/body already committed (future streaming) | Never replay on another credential/provider, even after stream failure. |
-| Concurrent requests and isolate restart | No claim of globally coordinated quota, durable affinity or cross-isolate cooldown. |
-| Payload at/over 10 MiB; compression negotiation and WebSocket upgrade attempts | Enforce existing body/path bounds; no implicit compression or transport expansion. |
+| Scenario | Required Shunt Shim observation | Status on `main` |
+| :--- | :--- | :--- |
+| Parallel tool calls reuse function names but have distinct IDs; results arrive across turns | Associate by valid call ID, preserve arguments/results, reject orphan or duplicate-invalid structures before dispatch. | Orphan and duplicate-ID rejection and multi-tool round trips are covered in [validation](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/validation.test.ts) and [tool-cycle](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/tool-cycle.test.ts) tests. Same-name calls with distinct IDs are not: tracked in [#229](https://github.com/gordonpn/shunt-shim/issues/229). |
+| Tool-only, length-limited, filtered or missing-usage response | Preserve permitted null content/finish reasons and optional usage; reject malformed core output with 502. | Covered in [tool-cycle tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/tool-cycle.test.ts) for both providers. |
+| Unknown reasoning/vendor extras collide with model or auth fields | Only approved mappings survive; validated routing and secrets cannot be overwritten. | Covered in [validation tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/validation.test.ts) (extensions cannot override core parameters, prototype-less extensions). |
+| Unsupported image/audio/video, Responses or streaming request | Follow the explicit current request/path contract before contacting a provider; do not silently drop unsupported core input. | Multimodal and stream rejection are covered in [validation tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/validation.test.ts); unknown routes return 404 per [diagnostics tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/diagnostics.test.ts). |
+| Primary 413/429/503/530/network/header timeout, then fallback succeeds | Exactly two attempts at most, no retry round or same-account replay. | Covered in [fallback](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/fallback.test.ts) and [cancellation](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/cancellation.test.ts) tests, including no third attempt. |
+| Primary 400/401/403 or malformed successful output | No fallback outside the existing eligible categories; retain explicit validation/auth/protocol failure classification. | Covered in [fallback tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/fallback.test.ts). |
+| Both 429; both unavailable; mixed eligible errors | Preserve quota vs unavailable distinction and the existing final-attempt error/header policy. | Covered in [fallback tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/fallback.test.ts). |
+| Large or malformed Retry-After and sensitive upstream error headers/body | Only allowlisted retry headers escape; no raw payload or secret reaches diagnostics. | Allowlist and secret-header exclusion are covered in [rate-limit header tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/rate-limit-headers.test.ts) and diagnostics tests. Allowlisted values are forwarded verbatim; they are not range-checked, and no test sends a large or malformed value. This is a limitation, not a tracked gap, because the provider is a trusted configured upstream. |
+| Deadline or client abort between selection and fallback | Cancel in-flight work and make no new attempt; total wall time remains bounded. | Covered in [cancellation tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/cancellation.test.ts). |
+| Headers/body already committed (future streaming) | Never replay on another credential/provider, even after stream failure. | Not applicable: streaming is rejected before dispatch. |
+| Concurrent requests and isolate restart | No claim of globally coordinated quota, durable affinity or cross-isolate cooldown. | Concurrent isolation is covered in cancellation tests; the absence of coordination is a documented non-goal. The test race is tracked in [#217](https://github.com/gordonpn/shunt-shim/issues/217). |
+| Payload at/over 10 MiB; compression negotiation and WebSocket upgrade attempts | Enforce existing body/path bounds; no implicit compression or transport expansion. | The 10 MiB bound is covered in validation and ingress tests. No test covers compression negotiation or WebSocket upgrade; the Workers platform terminates both, so no issue is created. |
 
-## Evidence limits
+## Evidence and limitations
 
 Inspected official source and configuration at the pinned revision, not every
 provider adapter, transport or Home deployment. No live credentials, provider
@@ -196,3 +203,11 @@ proven with Shunt Shim client fixtures and deployed smoke tests before adopting
 a provider. Upstream defaults and behavior can change; use the pinned links when
 reviewing these recommendations alongside [MVP](../MVP.md) and
 [architecture](../ARCHITECTURE.md).
+
+## Recommended next action
+
+Recommend no code, dependency or runtime change. Retain the two official
+OpenAI-compatible upstreams and bounded failover. The only uncovered concrete
+case, same-name parallel tool calls with distinct IDs, is tracked in
+[#229](https://github.com/gordonpn/shunt-shim/issues/229) (P3, XS). Merge this
+document as reference.
