@@ -715,9 +715,12 @@ export async function forwardChatCompletion(
       };
     }
 
+    // Without streaming SSE, upstream headers arrive only after full completion;
+    // allow Attempt 2 up to the remaining total deadline unless connectTimeoutMs is overridden.
+    const fallbackLimitMs = options?.connectTimeoutMs ?? remainingMs;
     const fallbackTimeoutMs = Math.max(
       1,
-      Math.min(connectTimeoutMs, remainingMs),
+      Math.min(fallbackLimitMs, remainingMs),
     );
     const fallbackAttempt = createAttemptSignal(
       options?.signal,

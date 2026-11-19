@@ -56,6 +56,7 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   const captureFetch = (
@@ -407,6 +408,75 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
       const secondCall = getCall(calls, 1);
       expect(firstCall.signal?.aborted).toBe(true);
       expect(secondCall.signal?.aborted).toBe(true);
+    });
+
+    it("allows slow non-streaming fallback completion beyond 5,000 ms within default 60,000 ms deadline", async () => {
+      vi.useFakeTimers();
+
+      captureFetch(async (url, init) => {
+        if (isGroqRequest(url)) {
+          return new Response("Request too large for model", { status: 413 });
+        }
+        return new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            resolve(Response.json(geminiFixtures.textCompletion));
+          }, 12_000);
+          init?.signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            const error = new Error("Aborted");
+            error.name = "TimeoutError";
+            reject(error);
+          });
+        });
+      });
+
+      const operation = forwardChatCompletion(createValidRequest(), mockEnv);
+      await vi.advanceTimersByTimeAsync(12_000);
+      const res = await operation;
+
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.diagnostic.provider).toBe("gemini");
+        expect(res.diagnostic.attempts).toBe(2);
+        expect(res.diagnostic.fallbackReason).toBe("payload_too_large");
+      }
+      expect(calls.length).toBe(2);
+    });
+
+    it("aborts hanging fallback at default 60,000 ms total deadline after 5,000 ms primary hang", async () => {
+      vi.useFakeTimers();
+      let primaryAbortedAt: number | undefined;
+      let fallbackAbortedAt: number | undefined;
+      const start = Date.now();
+
+      captureFetch(async (url, init) => {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const elapsed = Date.now() - start;
+            if (isGroqRequest(url)) {
+              primaryAbortedAt = elapsed;
+            } else {
+              fallbackAbortedAt = elapsed;
+            }
+            const error = new Error("Connection timeout");
+            error.name = "TimeoutError";
+            reject(error);
+          });
+        });
+      });
+
+      const operation = forwardChatCompletion(createValidRequest(), mockEnv);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const res = await operation;
+
+      expect(primaryAbortedAt).toBe(5_000);
+      expect(fallbackAbortedAt).toBe(60_000);
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.status).toBe(504);
+        expect(res.error.error.code).toBe("gateway_timeout");
+      }
+      expect(calls.length).toBe(2);
     });
   });
 
