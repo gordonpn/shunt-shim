@@ -51,6 +51,7 @@ Act as a skeptical architecture reviewer. Challenge whether this is the right so
 
 # Review Output Integration
 Map all architectural findings into the required PRReview schema instead of generating unformatted Markdown headings:
+- Emit at most one fenced yaml code block containing the complete `review:` mapping; never emit a leading skeleton block or multiple yaml blocks.
 - Under 'Key issues to review', include:
   - Architectural Verdict: ARCHITECTURALLY SOUND / SOUND BUT OVERBUILT / RECONSIDER DESIGN / ARCHITECTURAL BLOCKER.
   - Underlying use case and evaluation of key assumptions (verified, unverified, weak, contradicted).
