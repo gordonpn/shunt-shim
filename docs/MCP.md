@@ -443,3 +443,23 @@ curl --silent --output /dev/null --write-out "%{http_code}\n" \
 ```
 
 Expected HTTP status code: `401`.
+
+---
+
+## Evidence and Limitations
+
+Checked on 2026-11-19 through Context7 (indexed official documentation and source). "Verified" means the Context7 result quoted the documented key or command. I could not install or run any of the four clients, so none of the snippets was executed against a live server.
+
+| Client | Verified | Not verified |
+| :--- | :--- | :--- |
+| Antigravity CLI (`agy-cli`), docs at antigravity.google/docs/settings and /docs/cli/gcli-migration | Global `~/.gemini/config/mcp_config.json` and workspace `.agents/mcp_config.json` paths; `serverUrl` is the current remote URL key | The `headers` field and `${SHUNT_SHIM_TOKEN}` interpolation (the documented example uses `env`); the claim that SSE is unsupported (the migration page shows an `/sse` URL under `serverUrl`) |
+| Claude Code, docs at code.claude.com/docs/en/mcp (Context7 `/websites/code_claude`) | `claude mcp add --transport http <name> <url> --header "Authorization: Bearer ..."`; `${VAR}` expansion in `.mcp.json` `url` and `headers`; `type: "http"` | `${VAR}` expansion for values passed to `--header` or stored in `~/.claude.json`; the SSE transport is documented as deprecated, so prefer `/mcp` |
+| OpenCode, docs at opencode.ai/docs/mcp-servers and /docs/config (Context7 `/websites/opencode_ai`) | `type: "remote"`, `url`, `headers`, and `{env:VAR}` substitution (unset variables become an empty string) | `enabled: true` (the published schema lists `disabled`); the legacy `mcpServers` block, which I found nowhere in the docs and which uses `${VAR}` instead of `{env:VAR}` |
+| OpenAI Codex CLI, source at openai/codex `codex-rs/config` (Context7 `/openai/codex`, latest indexed tag `rust-v0.165.0`) | `[mcp_servers.<name>]` with `url`, `bearer_token_env_var`, `env_http_headers` (value is the environment variable name), `startup_timeout_sec`, `tool_timeout_sec`, `enabled` | Behavior of the specific version a reader has installed |
+
+The `/mcp` and `/sse` smoke tests in section 5.2, and every client registration against this gateway, are unverifiable today: `main` has no MCP transport and no `/v1/search` ingress. The request and response envelopes shown are the intended contract.
+
+## Next Action
+
+Once the MCP transport (#152) and search ingress (#113) land, run section 5.2 against `just dev` and a deployed Worker, register each of the four clients, and correct or delete every snippet in the Not verified column. That check is recorded as an acceptance item on #152; #154 stays open until it passes. No new issue is needed.
+
