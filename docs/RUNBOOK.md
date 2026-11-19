@@ -308,13 +308,13 @@ Every request emits a single structured JSON line upon completion. To safeguard 
 | `latencyMs` | number | Total request execution duration in milliseconds. |
 | `provider` | string (optional) | Upstream provider serving the request (`groq` or `gemini`). Omitted on pre-dispatch rejections. |
 | `model` | string (optional) | Concrete upstream model name. Omitted on pre-dispatch rejections. |
-| `fallbackReason` | string (optional) | Reason triggering fallback dispatch (`rate_limit_exceeded`, `service_unavailable`, `connection_timeout`, `network_error`). |
+| `fallbackReason` | string (optional) | Reason triggering fallback dispatch (`payload_too_large`, `rate_limit_exceeded`, `service_unavailable`, `origin_dns_error`, `connection_timeout`, `network_error`). |
 | `attempts` | number (optional) | Count of upstream dispatch attempts executed (`0`, `1`, or `2`). |
 
 **Privacy Controls and Credential Exclusion:**
 - Payloads, user prompts, system prompts, assistant completions, tool arguments, and tool results are never logged.
 - Client credentials (`Authorization`, `x-api-key`) and upstream secrets (`GROQ_API_KEY`, `GEMINI_API_KEY`) are strictly excluded.
-- Pre-dispatch rejections (such as HTTP 400, 401, 404, 405, 413) omit provider and model rather than fabricating placeholder values.
+- Pre-dispatch rejections (such as HTTP 400, 401, 404, 405, and inbound body-limit HTTP 413) omit provider and model rather than fabricating placeholder values.
 - Downstream clients receive the correlation identifier in the `x-request-id` HTTP response header for tracking.
 
 Example diagnostic log entry:
