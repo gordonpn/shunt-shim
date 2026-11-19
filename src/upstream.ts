@@ -92,8 +92,10 @@ function getRetryHeaders(response: Response): Record<string, string> {
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
 const DEFAULT_TOTAL_DEADLINE_MS = 60000;
 
-// Cloudflare Workers resolves origin/DNS failures to HTTP 530 instead of rejecting fetch().
+// Upstream HTTP 413 indicates per-request/TPM size rejection on smaller free-tier providers (e.g., Groq),
+// while Cloudflare Workers resolves origin/DNS failures to HTTP 530 instead of rejecting fetch().
 const ELIGIBLE_PRIMARY_FAILURE_REASONS = new Map<number, string>([
+  [413, "payload_too_large"],
   [429, "rate_limit_exceeded"],
   [503, "service_unavailable"],
   [530, "origin_dns_error"],
