@@ -168,23 +168,25 @@ The downstream commitment point is defined as the moment the gateway flushes HTT
 
 ### Mixed-failure mapping and observable outcomes
 
-When Attempt 1 (the configured primary provider, default: Groq) fails with an eligible error (HTTP 429, HTTP 503, HTTP 530 Cloudflare Origin/DNS error, connect failure / 5s connect or header timeout, or network fetch failure) before downstream response commitment, Attempt 2 (the configured fallback provider, default: Gemini) executes within the remaining time of the 60s total deadline.
+When Attempt 1 (the configured primary provider, default: Groq) fails with an eligible error (HTTP 413 payload/TPM limit exceeded, HTTP 429, HTTP 503, HTTP 530 Cloudflare Origin/DNS error, connect failure / 5s connect or header timeout, or network fetch failure) before downstream response commitment, Attempt 2 (the configured fallback provider, default: Gemini) executes within the remaining time of the 60s total deadline.
 
 The returned HTTP status code and OpenAI-compatible error object match the final failing attempt:
 
 | Primary Attempt (Default: Groq) | Fallback Attempt (Default: Gemini) | Gateway Status | Error Code | Observable Outcome / Behavior |
 | :--- | :--- | :--- | :--- | :--- |
+| 413 Payload Too Large | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 429 Too Many Requests | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 503 Service Unavailable | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 530 Origin / DNS Error | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | Connect / Header Timeout (5s) | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | Network Fetch Failure | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| 413 Payload Too Large | 413 Payload Too Large | 502 | `bad_gateway` | Both providers rejected payload/TPM limit; return 502 error. |
 | 429 Too Many Requests | 429 Too Many Requests | 429 | `rate_limit_exceeded` | All providers rate-limited; preserve `Retry-After` from final attempt. |
 | 429 Too Many Requests | 503 Service Unavailable | 503 | `service_unavailable` | Final attempt unavailable; return 503 error. |
 | 503 Service Unavailable | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | 503 Service Unavailable | 503 Service Unavailable | 503 | `service_unavailable` | Both providers unavailable; return 503 error. |
 | 530 Origin / DNS Error | 530 Origin / DNS Error | 502 | `bad_gateway` | Both providers failed origin resolution; return 502 error. |
-| Eligible failure (429/503/530/timeout/network) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
+| Eligible failure (413/429/503/530/timeout/network) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
 | Connect / Header Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | Connect / Header Timeout (5s) | Connect / Header Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
 | Network Fetch Failure | Network Fetch Failure | 504 | `gateway_timeout` | Both provider network fetches failed; return 504 error. |

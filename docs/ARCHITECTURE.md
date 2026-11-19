@@ -75,7 +75,7 @@ The request pipeline runs the following validation and routing steps:
        v
 7. Primary Dispatch -----------> [Attempt primary provider (default: Groq qwen/qwen3.8-27b) with 5s timeout]
        |
-       +--> [On 429 / 503 / 530 / Timeout / Network Error] -> Fallback provider (default: Gemini gemini-2.5-flash-lite)
+       +--> [On 413 / 429 / 503 / 530 / Timeout / Network Error] -> Fallback provider (default: Gemini gemini-2.5-flash-lite)
        |
        v
 8. Response Normalization -----> [Normalize JSON body and extract usage/tools]
@@ -107,7 +107,7 @@ Streaming completions are deferred beyond the MVP. If the parsed request body co
 
 ### Stage 7: Upstream Dispatch and Bounded Fallback
 - **Attempt 1 (Primary):** Dispatches to the configured primary provider (default: Groq `qwen/qwen3.8-27b` using `https://api.groq.com/openai/v1/chat/completions`). A 5s connection and header timeout aborts stagnant handshakes.
-- **Eligible Failures:** Upstream HTTP 429 (rate limit), HTTP 503 (service unavailable), HTTP 530 (Cloudflare Origin/DNS error), connection/header timeout, or network fetch failure trigger fallback.
+- **Eligible Failures:** Upstream HTTP 413 (provider payload/TPM limit exceeded), HTTP 429 (rate limit), HTTP 503 (service unavailable), HTTP 530 (Cloudflare Origin/DNS error), connection/header timeout, or network fetch failure trigger fallback.
 - **Attempt 2 (Fallback):** Dispatches to the configured fallback provider (default: Google AI Studio `gemini-2.5-flash-lite` using `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`). Setting `PRIMARY_PROVIDER=gemini` swaps provider order at runtime.
 - **Wall-Clock Deadline:** The gateway enforces a strict 60s total request deadline across all attempts. If the deadline expires, in-flight fetches are aborted immediately, returning HTTP 504 `gateway_timeout`.
 - **Pre-dispatch Rejections:** Pre-dispatch failures (HTTP 400, 401, 404, 405, 413) omit provider and model metadata rather than fabricating uncontacted provider names.
