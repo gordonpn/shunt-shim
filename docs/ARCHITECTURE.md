@@ -106,9 +106,9 @@ The request must contain a non-empty `messages` array with valid roles (`system`
 Streaming completions are deferred beyond the MVP. If the parsed request body contains `"stream": true`, the gateway returns HTTP 400 Bad Request with code `unsupported_parameter` and param `stream`. If `stream_options` is supplied, the gateway returns HTTP 400 Bad Request with code `unsupported_parameter` and param `stream_options`.
 
 ### Stage 7: Upstream Dispatch and Bounded Fallback
-- **Attempt 1 (Primary):** Dispatches to the configured primary provider (default: Groq `qwen/qwen3.8-27b` using `https://api.groq.com/openai/v1/chat/completions`). A 5s connection and header timeout aborts stagnant handshakes.
+- **Attempt 1 (Primary):** Dispatches to the configured primary provider (default: Groq `qwen/qwen3.8-27b` using `https://api.groq.com/openai/v1/chat/completions`). A 5s primary timeout aborts stagnant requests.
 - **Eligible Failures:** Upstream HTTP 413 (provider payload/TPM limit exceeded), HTTP 429 (rate limit), HTTP 503 (service unavailable), HTTP 530 (Cloudflare Origin/DNS error), connection/header timeout, or network fetch failure trigger fallback.
-- **Attempt 2 (Fallback):** Dispatches to the configured fallback provider (default: Google AI Studio `gemini-2.5-flash-lite` using `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`). Setting `PRIMARY_PROVIDER=gemini` swaps provider order at runtime.
+- **Attempt 2 (Fallback):** Dispatches to the configured fallback provider (default: Google AI Studio `gemini-2.5-flash-lite` using `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`) up to the remaining 60s total deadline (accommodating non-streaming completion generation unless overridden). Setting `PRIMARY_PROVIDER=gemini` swaps provider order at runtime.
 - **Wall-Clock Deadline:** The gateway enforces a strict 60s total request deadline across all attempts. If the deadline expires, in-flight fetches are aborted immediately, returning HTTP 504 `gateway_timeout`.
 - **Pre-dispatch Rejections:** Pre-dispatch failures (HTTP 400, 401, 404, 405, and inbound 10 MB body-limit HTTP 413) omit provider and model metadata rather than fabricating uncontacted provider names.
 
