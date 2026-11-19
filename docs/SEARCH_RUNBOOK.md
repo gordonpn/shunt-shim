@@ -1,7 +1,7 @@
 # Search Gateway Operational Runbook
 
 > [!NOTE]
-> **Implementation Status and Scope:** This runbook defines the operational procedures, financial safety checks, smoke tests, diagnostic telemetry interpretation, and incident response playbooks for the `/v1/search` gateway subsystem (Stories `#113`, `#130`, `#138`, `#160`). It complements the existing OpenAI Chat Completions operational guide in [docs/RUNBOOK.md](RUNBOOK.md). While search runtime components are under active implementation, use this document as the canonical operational specification for search provider management.
+> **Implementation Status and Scope:** This runbook defines the operational procedures, financial safety checks, smoke tests, diagnostic telemetry interpretation, and incident response playbooks for the `/v1/search` gateway subsystem (Stories `#113`, `#130`, `#138`, `#160`). It complements the existing OpenAI Chat Completions operational guide in [docs/RUNBOOK.md](RUNBOOK.md). The search runtime is partly implemented: `src/search` on `main` contains the provider registry, quota policy, and router, but no `/v1/search` route is wired into `src/index.ts`, so the smoke tests in Section 3 cannot pass yet. Treat this document as the target operational specification.
 
 ---
 
@@ -12,9 +12,9 @@ The `/v1/search` subsystem aggregates upstream web search APIs behind a single a
 | Provider | Phase | Secret Variable | Billing Model | Default Eligibility (`FREE_ONLY_POLICY=true`) |
 | :--- | :--- | :--- | :--- | :--- |
 | Tavily | Phase 1 (Default Primary) | `TAVILY_API_KEY` | Hard-capped free tier (no credit card required; 1,000 credits/month) | Eligible |
-| Exa | Phase 1 (Default Fallback) | `EXA_API_KEY` | Hard-capped free tier (no credit card required; free starter credits) | Eligible |
-| Linkup | Phase 1 (Optional) | `LINKUP_API_KEY` | Hard-capped free allowance | Eligible when configured |
-| Brave Search | Phase 2 (Card-Backed) | `BRAVE_API_KEY` | Credit-card-backed ($5/month free credits; automatic paid overage if uncapped) | Quarantined |
+| Exa | Phase 1 (Default Fallback) | `EXA_API_KEY` | Hard-capped free tier (no payment method required; $10 monthly credit balance, HTTP 402 when exhausted) | Eligible |
+| Linkup | Phase 1 (Optional) | `LINKUP_API_KEY` | Unverified free allowance (renewal, card, and hard-stop policy not established) | Ineligible; keep quarantined until terms and billing review complete |
+| Brave Search | Phase 2 (Card-Backed) | `BRAVE_API_KEY` | Credit-card-backed ($5/month credits; prepaid, no subscription, charged only for purchased credits; verify account recharge controls) | Quarantined |
 | Parallel Search | Phase 2 (Card-Backed) | `PARALLEL_API_KEY` | Credit-card-backed (pay-per-query beyond promotional credits) | Quarantined |
 
 ---
@@ -321,3 +321,25 @@ If a recent Worker deployment introduces a regression in `/v1/search` routing, s
    ```
 
 3. Re-run the `/v1/search` smoke tests in Section 3 and the ingress verification suite (`just verify-ingress https://shunt-shim.<subdomain>.workers.dev`) to confirm service recovery.
+
+---
+
+## Evidence and Limitations
+
+What I verified against `origin/main` (commit `b5a3e96`) source:
+
+- `FREE_ONLY_POLICY` (fail-closed unless `"false"`), `ALLOW_CARD_BACKED_PROVIDERS`, and `PRIMARY_SEARCH_PROVIDER` are read in `src/search/quota/policy.ts` and `src/search/registry.ts`.
+- HTTP 403 `provider_quarantined_for_billing_safety` and HTTP 503 `no_eligible_free_providers` are produced by `src/search/quota/policy.ts`; `rate_limit_exceeded` and `gateway_timeout` exist in `src/search/errors.ts` and `src/search/router.ts`.
+- The 5s per-provider connect timeout and 30s total deadline are `SEARCH_CONNECT_TIMEOUT_MS` and `SEARCH_TOTAL_DEADLINE_MS` in `src/search/router.ts`.
+- `just provision-secrets`, `deployments`, `rollback`, `verify-ingress`, and `tail` exist in the `Justfile`.
+
+What is not verified or not yet true:
+
+- No `/v1/search` route exists on `main`, so every `curl` probe, the 401/400/413 behavior, and the `SearchDiagnosticMetadata` log line are untested end to end. Those codes are intended behavior, not observed behavior.
+- `invalid_json`, `invalid_parameter`, `invalid_api_key`, `payload_too_large`, and `upstream_error` for the search route are not checked against a search ingress handler because none exists.
+- Provider billing claims are unmerged research. Exa ($10 monthly balance) and Brave (prepaid, no subscription) follow the economics comparison in PR #178 (`docs/FREE_TIERS.md` section 7); Linkup stays ineligible per the terms audit in PR #208 (`docs/research/search-provider-terms.md`) and the quarantine in PR #189. Recheck these when those PRs merge.
+- Phase 2 preconditions (Durable Object quota reservations, hard spend caps) are not implemented.
+
+## Next Action
+
+Keep this PR in draft until the search ingress route (#113) is merged, then run every Section 3 probe against `just dev` and a preview deployment, correct any status or error code that differs, and mark ready. Remaining runtime work is already tracked in #113, #130, #138, #161, and #162; no new issue is needed.
