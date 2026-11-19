@@ -58,9 +58,15 @@ cross-group fallbacks; context-window and content-policy recovery broaden policy
 beyond the MVP. Weighted selection and fallback are also separate concerns [L6].
 
 Keep the [MVP contract](../MVP.md): at most two serial upstream calls, with one
-fallback only for primary 429, 503, connect/header timeout, or network fetch
-failure within the remaining 60-second total deadline. Keep the 5-second
-connect/header bound, cancel active work on disconnect/deadline, and do not retry
+fallback only for primary 413, 429, 503, 530, connect/header timeout, or network
+fetch failure within the remaining 60-second total deadline (eligibility as of
+`main` at [`b5a3e96`](https://github.com/gordonpn/shunt-shim/commit/b5a3e96),
+verified in [upstream.ts](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/src/upstream.ts);
+HTTP 413 was added by [#226](https://github.com/gordonpn/shunt-shim/pull/226)).
+At that revision the 5-second connect/header bound applies to both attempts;
+open PR [#228](https://github.com/gordonpn/shunt-shim/pull/228) would bound only
+the fallback attempt by the remaining total deadline and keep 5 seconds for the
+primary. Cancel active work on disconnect/deadline, and do not retry
 400, 401/403, 500/502, malformed success payloads, or a failed fallback. No
 backoff timer, callback, adapter, or SDK may add a hidden third call. Normalize
 errors into safe OpenAI envelopes without leaking upstream response bodies or
@@ -138,27 +144,39 @@ or free-tier quota claims about LiteLLM or a port of its core.
 | Avoid | Layering provider retries, per-group retries and fallback chains; hedged/mirrored calls. | Never multiply the request's fixed attempt or quota budget. |
 | Avoid | Midstream continuation, permissive client endpoint/key overrides and raw callback logging. | Preserve commitment, credential isolation and privacy boundaries. |
 
-### Compatible follow-up candidates
+### Follow-up candidates and their status
 
-These are proposed scopes for review, not newly created issues or changes made
-by this research. First compare existing tests to avoid duplicating coverage.
+Statements about Shunt Shim behavior below are pinned to `main` at
+[`b5a3e96`](https://github.com/gordonpn/shunt-shim/commit/b5a3e96). I compared
+the three candidates raised during this research with the existing tests and
+issues; all three are already covered, so this research creates no new issue.
 
-1. Audit retry ownership with mocked fetches: count calls for each eligible and
-   ineligible primary failure, failed fallback, malformed 200, deadline and
-   disconnect. Assert at most two calls and zero dispatch after cancellation;
-   cover cancellation during body parsing and cleanup, not only header wait.
-2. Extend provider normalization fixtures only where gaps exist: multiple tool
-   calls and matching results, null tool-only content, truncation/filter finish
-   reasons, optional usage/reasoning, and rejection of malformed upstream shapes.
-   Run both configured providers independently through the same contract.
-3. Audit diagnostic coverage on every terminal path using sentinel secrets,
-   prompt text, tool arguments and raw errors. Assert the exact allowlist and
-   one logical-request outcome. Existing [diagnostics tests](../../test/diagnostics.test.ts)
-   already cover many of these cases and should be extended only for gaps.
+| Candidate | Status on `main` | Evidence |
+| :--- | :--- | :--- |
+| Retry ownership with mocked fetches, including cancellation during body parsing | Covered | [cancellation tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/cancellation.test.ts) assert no fallback after a primary 200 body-parse rejection with client disconnect, no third attempt after a fallback body-parse rejection, and no third attempt in [fallback tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/fallback.test.ts). Delivered by [#220](https://github.com/gordonpn/shunt-shim/issues/220) and PR [#221](https://github.com/gordonpn/shunt-shim/pull/221). |
+| Provider normalization fixtures (multiple tool calls, null content, finish reasons, malformed shapes) | Covered | [tool-cycle tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/tool-cycle.test.ts) cover multi-tool turns and results on both Groq and Gemini, `length` and `content_filter` finish reasons, optional usage and reasoning, and HTTP 502 for malformed, null-content and invalid `tool_calls` shapes. Delivered by #220 and #221. |
+| Diagnostics coverage with sentinel secrets | Covered | [diagnostics tests](https://github.com/gordonpn/shunt-shim/blob/b5a3e96/test/diagnostics.test.ts) assert the exact allowlist, one record per request, and no secrets, prompts, tool arguments or raw errors on success, fallback and terminal failure paths. Delivered by #220 and #221. |
 
-Streaming, new providers and stateful controls are not MVP-compatible follow-up
-issues from this investigation. Revisit them only under separately approved
-post-MVP work.
+Related open work that already tracks adjacent concerns: [#217](https://github.com/gordonpn/shunt-shim/issues/217)
+(race in the concurrent cancellation test) and [#227](https://github.com/gordonpn/shunt-shim/issues/227)
+(alerting and triage context). Streaming, new providers and stateful controls
+remain out of MVP scope and are not proposed.
+
+### Evidence and limitations
+
+- Evidence: LiteLLM source at the pinned commit, its official documentation on
+  the check date, and the Shunt Shim source and tests at `b5a3e96`.
+- Not done: no deployed LiteLLM run, no benchmark, no compatibility
+  certification, and no provider traffic.
+- Documentation links are mutable and can drift from the pinned source.
+- Shunt Shim eligibility and timeout statements describe `main` at `b5a3e96`
+  and can change; see the next section.
+
+### Recommended next action
+
+Recommend no code or dependency change. Keep the existing contract and tests as
+the baseline, and merge this document as reference. No follow-up issue is
+required by this research.
 
 ### Sources
 
