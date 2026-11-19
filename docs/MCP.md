@@ -462,4 +462,3 @@ The `/mcp` and `/sse` smoke tests in section 5.2, and every client registration 
 ## Next Action
 
 Once the MCP transport (#152) and search ingress (#113) land, run section 5.2 against `just dev` and a deployed Worker, register each of the four clients, and correct or delete every snippet in the Not verified column. That check is recorded as an acceptance item on #152; #154 stays open until it passes. No new issue is needed.
-
