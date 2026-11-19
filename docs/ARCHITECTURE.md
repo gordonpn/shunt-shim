@@ -110,7 +110,7 @@ Streaming completions are deferred beyond the MVP. If the parsed request body co
 - **Eligible Failures:** Upstream HTTP 413 (provider payload/TPM limit exceeded), HTTP 429 (rate limit), HTTP 503 (service unavailable), HTTP 530 (Cloudflare Origin/DNS error), connection/header timeout, or network fetch failure trigger fallback.
 - **Attempt 2 (Fallback):** Dispatches to the configured fallback provider (default: Google AI Studio `gemini-2.5-flash-lite` using `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`). Setting `PRIMARY_PROVIDER=gemini` swaps provider order at runtime.
 - **Wall-Clock Deadline:** The gateway enforces a strict 60s total request deadline across all attempts. If the deadline expires, in-flight fetches are aborted immediately, returning HTTP 504 `gateway_timeout`.
-- **Pre-dispatch Rejections:** Pre-dispatch failures (HTTP 400, 401, 404, 405, 413) omit provider and model metadata rather than fabricating uncontacted provider names.
+- **Pre-dispatch Rejections:** Pre-dispatch failures (HTTP 400, 401, 404, 405, and inbound 10 MB body-limit HTTP 413) omit provider and model metadata rather than fabricating uncontacted provider names.
 
 ### Stage 8: Protocol Normalization
 Both Groq and Google AI Studio provide standard OpenAI-compatible `/chat/completions` endpoints. Upstream JSON responses are parsed, validated, and normalized to ensure required completion IDs, created timestamps, choices, tool call arguments, finish reasons, and usage objects are well-formed before returning to the client.
