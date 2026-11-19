@@ -31,10 +31,12 @@ it is not evidence that the combined deployment has passed a live preview test.
 | Option | Preview and operational consequences | Position |
 | --- | --- | --- |
 | Separate coordinator Worker, external `script_name` binding | Retains gateway Version URLs and the existing ingress gate. Adds a separately released stateful dependency, protocol compatibility obligations, and a shared preview namespace requiring test isolation. | Recommended, subject to the gates below. |
-| Per-PR named gateway Worker using `wrangler deploy`, with the coordinator implemented there | Uses ordinary `workers.dev` endpoints instead of Version URLs. Requires new naming, route suppression, secret provisioning, concurrency, PR-close teardown, and orphan cleanup. Each Worker owns its namespace and migrations. More Workers and retained state consume account resources. | Supported fallback if external-binding Version URLs fail validation; requires a separate implementation decision. |
+| Cloudflare isolated Previews (`wrangler preview`), with the coordinator implemented in the gateway Worker | Distinct from Version URLs [1, 7]. Requires Wrangler 4.135.0+ (`package.json` pins `^4.149.0`) and a `previews` configuration block; does not inherit production settings and requires applying preview secrets separately [7]. Automatically provisions an isolated Durable Object namespace per Preview, emits per-Preview and per-Deployment URLs, and enforces 100 Previews/Worker on Free (500 on Paid) and 100 deployments/Preview with oldest-first eviction [7, 8]. Service bindings, Workflow bindings, Queue consumers, Cron Triggers, and routes remain production-targeted [8]. | Candidate alternative evaluated from documentation only (see [PR #192](https://github.com/gordonpn/shunt-shim/pull/192)); requires live validation of `wrangler preview` in `.github/scripts/deploy-preview.sh`, `just verify-ingress` against Preview URLs, and preview-account credential behavior ([#186](https://github.com/gordonpn/shunt-shim/issues/186)) before selecting over the external coordinator Worker. |
+| Per-PR named gateway Worker using `wrangler deploy`, with the coordinator implemented there | Uses ordinary `workers.dev` endpoints instead of Version URLs. Requires new naming, route suppression, secret provisioning, concurrency, PR-close teardown, and orphan cleanup. Each Worker owns its namespace and migrations. More Workers and retained state consume account resources. | Supported fallback if both external-binding Version URLs and isolated Previews fail validation; requires a separate implementation decision. |
 
-Cloudflare's newer isolated **Previews** are distinct from Version URLs [1]. This
-ADR does not evaluate or migrate to that deployment product.
+Cloudflare's isolated **Previews** product (`wrangler preview`) is distinct from
+Version URLs [1, 7] and is assessed above from official documentation only; no
+live Preview deployment has been tested.
 
 ## Configuration and isolation
 
@@ -175,7 +177,7 @@ isolation are verified. No live deployments or quota acceptance tests are claime
 
 ## Sources
 
-Official Cloudflare documentation checked 2026-11-15:
+Official Cloudflare documentation checked 2026-11-15 (sources 1-6) and 2026-11-19 (sources 7-8):
 
 1. [Version URLs and limitations](https://developers.cloudflare.com/workers/versions-and-deployments/version-urls/)
 2. [Wrangler Durable Object bindings](https://developers.cloudflare.com/workers/wrangler/configuration/#durable-objects)
@@ -183,3 +185,5 @@ Official Cloudflare documentation checked 2026-11-15:
 4. [Durable Object class exports and lifecycle](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/) and [legacy class migrations](https://developers.cloudflare.com/durable-objects/reference/durable-object-class-migrations-legacy/)
 5. [Durable Object lifecycle changes and version uploads](https://developers.cloudflare.com/workers/versions-and-deployments/gradual-deployments/with-durable-objects/)
 6. [Durable Object pricing and Free limits](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+7. [Workers Previews overview](https://developers.cloudflare.com/workers/previews/)
+8. [Workers Previews resources and isolation](https://developers.cloudflare.com/workers/previews/resources/)
