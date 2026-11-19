@@ -2,7 +2,7 @@
 
 **Issue**: [#183](https://github.com/gordonpn/shunt-shim/issues/183)
 **Related Issues**: [#134](https://github.com/gordonpn/shunt-shim/issues/134), [#135](https://github.com/gordonpn/shunt-shim/issues/135), [#186](https://github.com/gordonpn/shunt-shim/issues/186)
-**Status**: Evaluated (Retain GitHub Actions `wrangler versions upload --preview-alias` flow with `preview_urls: true` and dedicated preview-account isolation)
+**Status**: Partially evaluated. Version URLs and Workers Builds are evaluated; the isolated Previews product is assessed from documentation only (section 2.1). Interim position: (Retain GitHub Actions `wrangler versions upload --preview-alias` flow with `preview_urls: true` and dedicated preview-account isolation)
 
 ---
 
@@ -21,9 +21,9 @@
 
 ## 2. Comparison: Current `wrangler versions upload` Flow vs Native Worker Previews / Workers Builds
 
-Cloudflare Worker Previews encompass two layers:
-1. **Workers Version Previews (`preview_urls: true` + `wrangler versions upload --preview-alias`)**: The underlying runtime mechanism that exposes immutable version URLs and mutable alias URLs without shifting production traffic. This is already used by `.github/scripts/deploy-preview.sh`.
-2. **Workers Builds (Git-connected automatic builds / `wrangler preview`)**: Cloudflare's managed CI/CD integration that automatically builds branches and uploads preview versions directly from GitHub push events.
+This table compares two mechanisms. Cloudflare's separate isolated **Previews** product is evaluated in section 2.1.
+1. **Workers Version URLs (`preview_urls: true` + `wrangler versions upload --preview-alias`)**: The underlying runtime mechanism that exposes immutable version URLs and mutable alias URLs without shifting production traffic. This is already used by `.github/scripts/deploy-preview.sh`.
+2. **Workers Builds (Git-connected automatic builds)**: Cloudflare's managed CI/CD integration that builds branches and uploads preview versions from Git push events.
 
 | Dimension | Current GitHub Actions Flow (`wrangler versions upload --preview-alias pr-<number>`) | Native Workers Builds / Automatic Branch Previews | Assessment for `shunt-shim` |
 | :--- | :--- | :--- | :--- |
@@ -33,6 +33,19 @@ Cloudflare Worker Previews encompass two layers:
 | **Logs and Observability** | Although `observability.enabled: true` is set in `wrangler.jsonc` for production deployments, Cloudflare's [Version URLs limitations](https://developers.cloudflare.com/workers/versions-and-deployments/version-urls/#limitations) state: "You cannot view logs for Version URLs with Workers Logs, Wrangler tail, or Logpush." Operators debugging failed ingress probes must rely on the HTTP probe diagnostics captured in GitHub Actions logs rather than dashboard logs or `wrangler tail`. | Shares the exact same Version URL runtime logging limitation (`Workers Logs`, `wrangler tail`, and `Logpush` are unavailable for Version URLs), though Workers Builds links build logs in the Cloudflare dashboard. | Neither mechanism provides runtime request logs on Version URLs. The GitHub Actions flow keeps build, upload, and `verify-ingress` HTTP diagnostics unified in CI without requiring Cloudflare dashboard access. |
 | **Lifecycle and Cleanup** | Concurrency group `deploy-preview-<number>` cancels superseded runs. Uploaded versions do not route production traffic or consume custom domain slots. Versions age out under Cloudflare's account retention policy; aliases remain pointed at the final PR version after merge/close. | Automatic branch builds upload a new version on every branch push (including non-PR branches unless filtered). Retention follows the same Cloudflare version history limits. | Current flow avoids wasted builds on unreferenced draft branches by triggering only on `pull_request` (`opened`, `synchronize`, `reopened`). |
 | **Failure Behavior and Bootstrap Edge Case ([#186](https://github.com/gordonpn/shunt-shim/issues/186))** | If deployment credentials are absent, the job skips cleanly (`configured=false`). If the target Worker has never been created in the target account via `wrangler deploy`, `wrangler versions upload` fails with `You cannot upload a new version of a Worker that does not yet exist. Please run the deploy command first.` | Fails the GitHub check status if the Cloudflare build fails or if account bindings/Worker prerequisites are missing; cannot skip gracefully based on repository file readiness (`needs.project.outputs.ready`). | Current flow cleanly gates unconfigured repositories and fork PRs, provided the target preview account has had its initial `shunt-shim` Worker bootstrapped once from trusted code ([#186](https://github.com/gordonpn/shunt-shim/issues/186)). |
+
+### 2.1 Isolated Previews product (`wrangler preview`)
+
+Cloudflare documents a separate **Previews** product that is distinct from Version URLs and Wrangler environments ([Previews overview](https://developers.cloudflare.com/workers/previews/), docs checked 2026-11-19). Facts below come from that page and its [Resources and isolation](https://developers.cloudflare.com/workers/previews/resources/) page (last modified 2026-11-09 per page metadata):
+
+- `npx wrangler preview` creates or updates a per-branch Preview under the same Worker. It requires Wrangler 4.135.0 or later.
+- Previews do not inherit production settings. Variables, secrets, and bindings come from a `previews` block in the Wrangler configuration, and secrets are applied with commands.
+- Each Preview gets a Preview URL (latest deployment) and an immutable Deployment URL, on `workers.dev` and optionally a custom domain. URLs are public unless protected with Cloudflare Access.
+- Cloudflare automatically provisions a separate Durable Object namespace per Preview. KV, D1, and R2 are isolated only when the Preview is bound to separate resources.
+- Limitations: service bindings call the production Worker, Workflow bindings reuse existing Workflows, Queue consumers and Cron Triggers cannot target a Preview, and routes target production.
+- Limits: 100 Previews per Worker on Free and 500 on paid plans, 100 deployments per Preview, with oldest-first automatic deletion.
+
+Relevance: automatic per-Preview Durable Object namespaces would address the Version URL blocker for `SearchQuotaCoordinator` ([#134](https://github.com/gordonpn/shunt-shim/issues/134), [#135](https://github.com/gordonpn/shunt-shim/issues/135)) without a separate coordinator Worker. That compatibility problem is tracked in [#204](https://github.com/gordonpn/shunt-shim/issues/204) and PR [#210](https://github.com/gordonpn/shunt-shim/pull/210) (ADR 0004). I did not verify the product's release status or pricing, whether `just verify-ingress` works against Preview URLs, how `wrangler preview` interacts with the account-level preview isolation in [#186](https://github.com/gordonpn/shunt-shim/issues/186), or whether Preview isolation holds for this Worker's actual bindings. No Preview was deployed. This product is therefore not adopted or rejected here.
 
 ---
 
@@ -155,7 +168,7 @@ In accordance with `AGENTS.md` and `docs/AUTOMATION.md`:
 1. **Runtime Project File Gate**: The `project` job in `.github/workflows/deploy.yml` checks `hashFiles('package.json') != '' && hashFiles('pnpm-lock.yaml') != '' && hashFiles('wrangler.jsonc') != ''` before any preview or production job can start.
 2. **Credential Availability Gate**: If preview credentials (`CLOUDFLARE_PREVIEW_API_TOKEN` / `CLOUDFLARE_PREVIEW_ACCOUNT_ID`) are not configured, the preview prerequisite check outputs `configured=false` and the `preview` job skips cleanly without failing pull request checks. Additionally, `.github/scripts/deploy-preview.sh` exits `0` when credentials are empty in local or dry-run environments.
 3. **Same-Repository Pull Request Gate**: The `preview` job requires `github.event.pull_request.head.repo.full_name == github.repository`, ensuring fork pull requests never receive preview deployment tokens.
-4. **Workflow Verification**: Any future adjustments to `.github/workflows/deploy.yml` or `.github/scripts/deploy-preview.sh` must be verified with `mise exec -- just check-workflows` (which runs `actionlint`, `shellcheck`, `test-secrets`, `test-deploy-scripts`, `test-sync-secrets`, and `wrangler.jsonc` flag checks).
+4. **Workflow Verification**: Any future adjustments to `.github/workflows/deploy.yml` or `.github/scripts/deploy-preview.sh` must be verified with `mise exec -- just check-workflows` (the `check-workflows` recipe in the `Justfile` is the authoritative list of what it runs).
 
 ### 5.4 Operational Bootstrap, Migration, and Rollback Plan
 
@@ -182,3 +195,18 @@ Because `wrangler versions upload` cannot create a Worker that does not yet exis
 - **Bad Preview Version on an Open PR**: Pushing a fix to the PR branch (or re-running `just deploy-preview pr-<number>` from a known-good commit) immediately reassigns the `pr-<number>` alias to the new version. Previous immutable version URLs (`https://<version-prefix>-shunt-shim.<preview-subdomain>.workers.dev`) remain accessible for bisecting regressions.
 - **Disabling Previews During Cloudflare Preview Account Maintenance**: Under the rewired `.github/workflows/deploy.yml` (PR [#185](https://github.com/gordonpn/shunt-shim/pull/185)), clearing `CLOUDFLARE_PREVIEW_API_TOKEN` or `CLOUDFLARE_PREVIEW_ACCOUNT_ID` in repository secrets causes `needs.project.outputs.configured` to evaluate to `false`, gracefully skipping the `preview` job across all open PRs without disabling `production` deployments on `main` or blocking CI quality gates (`check-format`, `lint`, `typecheck`, `test`, `build`, `check-workflows`).
 - **Production Rollback Independence**: Because preview versions upload via `wrangler versions upload` in a separate preview account and never modify active traffic splits in the production account, preview failures cannot impact production traffic. Production deployments on `main` retain independent automatic rollback via `just rollback` in `.github/scripts/deploy-production.sh`.
+
+---
+
+## 6. Evidence and Limitations
+
+- **Sources** (checked 2026-11-19): Cloudflare [Previews](https://developers.cloudflare.com/workers/previews/) and [Resources and isolation](https://developers.cloudflare.com/workers/previews/resources/) documentation, the [Version URLs](https://developers.cloudflare.com/workers/versions-and-deployments/version-urls/#limitations) limitations, and the repository files `.github/workflows/deploy.yml`, `.github/scripts/deploy-preview.sh`, `wrangler.jsonc`, and `Justfile` at this PR's head.
+- **Not tested**: no live preview deployment, no `wrangler preview` run, no Durable Object or external `script_name` binding under Version URLs, and no Workers Builds configuration. Cloudflare behavior is taken from documentation and may change.
+- **Unevaluated**: release status, pricing, and operational behavior of the isolated Previews product (section 2.1).
+
+## 7. Recommended Next Action
+
+1. Keep the current Version URL pipeline unchanged; no workflow change is justified by this document.
+2. Complete the dedicated preview account and credential separation in [#186](https://github.com/gordonpn/shunt-shim/issues/186).
+3. Resolve the Durable Object preview compatibility decision in [#204](https://github.com/gordonpn/shunt-shim/issues/204) and PR [#210](https://github.com/gordonpn/shunt-shim/pull/210) before adding `SearchQuotaCoordinator` ([#134](https://github.com/gordonpn/shunt-shim/issues/134), [#135](https://github.com/gordonpn/shunt-shim/issues/135)). Include the isolated Previews product as an option there, since it is the only evaluated path with automatic per-Preview Durable Object namespaces.
+4. Issue [#183](https://github.com/gordonpn/shunt-shim/issues/183) stays open until the Previews product is tested or explicitly rejected. No new issue is created because #204 already covers the preview-compatibility decision.
