@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe("Failed upstream response cleanup", () => {
-  it.each([429, 503, 530])(
+  it.each([413, 429, 503, 530])(
     "awaits primary %i cleanup before fallback",
     async (status) => {
       const started = barrier();
