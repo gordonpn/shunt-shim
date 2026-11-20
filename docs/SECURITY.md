@@ -70,7 +70,9 @@ invent a verification timestamp or represent provenance as proof of correctness.
 
 Clients should render these fields as escaped data within clearly labelled
 untrusted-content blocks or a structured tool result, outside system/developer
-instruction channels. Use serialization that escapes delimiter/control characters;
+instruction channels. Client rendering should present provider provenance
+explicitly as upstream origin without implying gateway verification or
+endorsement. Use serialization that escapes delimiter/control characters;
 a page can include a closing fence or fake role marker. Delimiters and provenance
 help interpretation but cannot by themselves prevent model instruction following.
 Operator guidance for client configurations is to treat web content strictly as
