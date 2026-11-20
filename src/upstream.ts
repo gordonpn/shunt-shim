@@ -38,6 +38,7 @@ export interface NormalizedChatCompletion {
  */
 export interface ForwardChatCompletionOptions {
   signal?: AbortSignal;
+  /** Maximum milliseconds to wait for primary response headers and cap each fallback attempt when set. */
   connectTimeoutMs?: number;
   totalDeadlineMs?: number;
 }
@@ -433,6 +434,36 @@ function normalizeUpstreamResponse(
   return completion;
 }
 
+function createAbortOrDeadlineResult(
+  provider: ProviderConfig,
+  attempts: 1 | 2,
+  clientAborted: boolean | undefined,
+  deadlineAborted: boolean,
+  elapsedMs: number,
+  totalDeadlineMs: number,
+  upstreamStatus: number,
+  fallbackReason?: string,
+): UpstreamCompletionResult | undefined {
+  if (!clientAborted && !deadlineAborted && elapsedMs < totalDeadlineMs) {
+    return undefined;
+  }
+  const message = clientAborted
+    ? "Client closed request or operation timed out"
+    : "Total request deadline exceeded";
+  return {
+    ok: false,
+    status: 504,
+    error: createErrorResponse(message, "api_error", "gateway_timeout"),
+    diagnostic: {
+      provider: provider.name,
+      model: provider.model,
+      attempts,
+      upstreamStatus,
+      ...(fallbackReason !== undefined ? { fallbackReason } : {}),
+    },
+  };
+}
+
 /**
  * Forwards a validated non-streaming chat completion request to an upstream provider.
  *
@@ -601,6 +632,16 @@ export async function forwardChatCompletion(
       try {
         rawJson = await primaryResponse.json();
       } catch {
+        const abortedResult = createAbortOrDeadlineResult(
+          primary,
+          1,
+          options?.signal?.aborted,
+          deadlineController.signal.aborted,
+          Date.now() - startTime,
+          totalDeadlineMs,
+          primaryResponse.status,
+        );
+        if (abortedResult) return abortedResult;
         return {
           ok: false,
           status: 502,
@@ -824,6 +865,17 @@ export async function forwardChatCompletion(
       try {
         rawJson = await fallbackResponse.json();
       } catch {
+        const abortedResult = createAbortOrDeadlineResult(
+          fallback,
+          2,
+          options?.signal?.aborted,
+          deadlineController.signal.aborted,
+          Date.now() - startTime,
+          totalDeadlineMs,
+          fallbackResponse.status,
+          fallbackReason,
+        );
+        if (abortedResult) return abortedResult;
         return {
           ok: false,
           status: 502,

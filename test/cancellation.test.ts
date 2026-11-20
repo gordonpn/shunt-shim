@@ -285,7 +285,7 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
 
       expect(bodyReadStarted).toBe(true);
       expect(calls.length).toBe(1);
-      expect([499, 502]).toContain(res.status);
+      expect([499, 504]).toContain(res.status);
     });
 
     it("makes no third attempt when fallback 200 body parsing rejects after client disconnect", async () => {
@@ -319,7 +319,41 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
 
       expect(bodyReadStarted).toBe(true);
       expect(calls.length).toBe(2);
-      expect([499, 502]).toContain(res.status);
+      expect([499, 504]).toContain(res.status);
+    });
+
+    it("returns HTTP 504 gateway_timeout when total deadline expires during fallback body read", async () => {
+      vi.useFakeTimers();
+
+      captureFetch(async (url, init) => {
+        if (isGroqRequest(url)) {
+          return new Response("Request too large for model", { status: 413 });
+        }
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () => {
+              controller.error(
+                new DOMException(
+                  "Total request deadline exceeded",
+                  "TimeoutError",
+                ),
+              );
+            });
+          },
+        });
+        return new Response(body, { status: 200 });
+      });
+
+      const operation = forwardChatCompletion(createValidRequest(), mockEnv);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const res = await operation;
+
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.status).toBe(504);
+        expect(res.error.error.code).toBe("gateway_timeout");
+        expect(res.diagnostic.attempts).toBe(2);
+      }
     });
   });
 
@@ -471,6 +505,40 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
 
       expect(primaryAbortedAt).toBe(5_000);
       expect(fallbackAbortedAt).toBe(60_000);
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.status).toBe(504);
+        expect(res.error.error.code).toBe("gateway_timeout");
+      }
+      expect(calls.length).toBe(2);
+    });
+
+    it("caps fallback attempt at explicit connectTimeoutMs when smaller than remaining deadline", async () => {
+      vi.useFakeTimers();
+      let fallbackAbortedAt: number | undefined;
+      const start = Date.now();
+
+      captureFetch(async (url, init) => {
+        if (isGroqRequest(url)) {
+          return new Response("Request too large for model", { status: 413 });
+        }
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            fallbackAbortedAt = Date.now() - start;
+            const error = new Error("Connection timeout");
+            error.name = "TimeoutError";
+            reject(error);
+          });
+        });
+      });
+
+      const operation = forwardChatCompletion(createValidRequest(), mockEnv, {
+        connectTimeoutMs: 10_000,
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      const res = await operation;
+
+      expect(fallbackAbortedAt).toBe(10_000);
       expect(res.ok).toBe(false);
       if (!res.ok) {
         expect(res.status).toBe(504);
