@@ -102,7 +102,7 @@ that documented workflow.
 The SDK guide names OpenCode, OpenClaw, Hermes, Claude Code, OpenWebUI, Dify and
 Continue, and qualifies compatibility as accepting an OpenAI base URL and key.
 **OpenCode is not OpenCodeReview**, and this does not certify any of shunt-shim's
-three review clients. The public example streams; it does not by itself prove
+three review clients (DeepSeek Review, OpenCodeReview, and PR-Agent). The public example streams; it does not by itself prove
 non-streaming behavior, function tools, all `tool_choice` modes, token-limit
 precedence, reasoning metadata, usage shape or error normalization.
 [SDK guide](https://inferx.net/docs/sdk-guides),
