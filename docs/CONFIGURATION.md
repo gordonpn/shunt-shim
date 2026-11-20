@@ -102,7 +102,7 @@ The gateway enforces deterministic bounds across all requests:
 | Inbound Request Body Limit | 10 MB (10,485,760 bytes) | Rejects oversized requests with HTTP 413 `payload_too_large` before JSON parsing. |
 | Shared Context Window Ceiling | 128,000 tokens | Requests exceeding combined character-based prompt estimate (`Math.ceil(chars / 4)`) and requested completion tokens return HTTP 400 `context_length_exceeded`. |
 | Maximum Output Tokens | 8,192 tokens | Supported via `max_tokens` or `max_completion_tokens`. Normalized to single upstream parameter. |
-| Upstream Connect Timeout | 5,000 ms (5 seconds) | Per-attempt connection deadline. Reaching 5s on primary triggers fallback. |
+| Upstream Primary Timeout | 5,000 ms (5 seconds) | Primary attempt timeout. Reaching 5s on primary triggers fallback; non-streaming fallback runs up to the remaining 60s total deadline by default. |
 | Total Request Deadline | 60,000 ms (60 seconds) | Total wall-clock deadline across all attempts. Expiration returns HTTP 504 `gateway_timeout`. |
 
 ## 5. Streaming Request Rejection (Deferred Feature)

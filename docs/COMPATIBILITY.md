@@ -83,7 +83,7 @@ extensions at dispatch. Native Anthropic adapters and a general provider IR are 
 | Inbound Request Body Limit | 10,485,760 | bytes (10 MB) | Immediate HTTP 413 `payload_too_large` response prior to JSON parse; zero upstream dispatch. On the Workers Free plan (10 ms CPU limit), parsing near-limit payloads will be benchmarked; streaming parsing or payload ceiling calibration applies if parsing approaches CPU budget. |
 | Shared Context Window Ceiling | 128,000 | tokens | Combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq context on pinned primary model `qwen/qwen3.8-27b` (128k context). PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` prior to upstream dispatch. |
 | Max Output Tokens Bound | 8,192 | tokens | Accepted in `max_tokens` or `max_completion_tokens`. Both Groq and Gemini support up to 8,192 completion tokens. |
-| Upstream Connect / Attempt Timeout | 5,000 | ms (5s) | Per-attempt connection and header timeout. Connection failure or reaching the 5s timeout on Attempt 1 triggers eligible fallback before response commitment. |
+| Upstream Primary / Fallback Timeout | 5,000 / 60,000 remaining | ms (5s / <=60s) | Primary attempt connection and response-header timeout is 5,000 ms (5s); reaching 5s on Attempt 1 triggers fallback. Without streaming SSE, fallback runs up to the remaining 60s total deadline unless `connectTimeoutMs` is explicitly overridden. |
 | Total Gateway Deadline | 60,000 | ms (60s) | Bounded wall-clock deadline across all attempts. Expiration before response commitment terminates request with HTTP 504 `gateway_timeout`. |
 
 Client and ingress timeout alignment:
@@ -188,7 +188,7 @@ The returned HTTP status code and OpenAI-compatible error object match the final
 | 530 Origin / DNS Error | 530 Origin / DNS Error | 502 | `bad_gateway` | Both providers failed origin resolution; return 502 error. |
 | Eligible failure (413/429/503/530/timeout/network) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
 | Connect / Header Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
-| Connect / Header Timeout (5s) | Connect / Header Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
+| Connect / Header Timeout (5s) | Fallback Deadline Timeout | 504 | `gateway_timeout` | Fallback timed out within remaining deadline (or explicit `connectTimeoutMs`); return 504 error. |
 | Network Fetch Failure | Network Fetch Failure | 504 | `gateway_timeout` | Both provider network fetches failed; return 504 error. |
 | 400 Bad Request | (No fallback) | 502 | `bad_gateway` | Upstream validation failure; do not retry; return 502 error. |
 | 401 / 403 Unauthorized | (No fallback) | 502 | `bad_gateway` | Upstream credential failure; do not expose upstream keys; return 502 error. |
