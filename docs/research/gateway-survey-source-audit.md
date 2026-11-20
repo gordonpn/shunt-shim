@@ -26,7 +26,10 @@ No upstream code was installed, executed or imported.
 1. Reconcile source identity before comparing functionality. Record accessible
    canonical repositories, exact revisions, licenses, and any rename/alias
    relationship; count one implementation once. Mark unavailable references
-   explicitly rather than inventing source-backed coverage.
+   explicitly rather than inventing source-backed coverage; for the two HTTP 404
+   references (`mulkymalikuldhrs/ProxyGateLLM` and `openrouter-ai/openrouter`),
+   ask the issue author on #64 to confirm canonical URLs or repository access
+   before substituting or dropping them.
 2. Classify by observed deployment footprint, separately from functional fit:
    free-tier aggregation, edge/serverless, daemon/hosted gateway, and client/UI
    integration are different axes. Do not preserve a Workers label merely because
