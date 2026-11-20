@@ -54,7 +54,7 @@ Replace `https://shunt-shim.<your-subdomain>.workers.dev` with `http://127.0.0.1
 
 ### 3.1 Antigravity CLI (`agy-cli`)
 
-`agy-cli` reads remote MCP server definitions from `~/.gemini/config/mcp_config.json` (global) or `<workspace>/.agents/mcp_config.json` (workspace). Remote servers require Streamable HTTP via `serverUrl`; legacy HTTP+SSE and the `httpUrl` field are not supported.
+`agy-cli` reads remote MCP server definitions from `~/.gemini/config/mcp_config.json` (global) or `<workspace>/.agents/mcp_config.json` (workspace). Remote servers use `serverUrl` (prefer Streamable HTTP `/mcp`; the `httpUrl` field is legacy, and whether `/sse` URLs work under `serverUrl` is unverified here).
 
 #### Streamable HTTP (`/mcp`)
 
@@ -452,9 +452,9 @@ Checked on 2026-11-19 through Context7 (indexed official documentation and sourc
 
 | Client | Verified | Not verified |
 | :--- | :--- | :--- |
-| Antigravity CLI (`agy-cli`), docs at antigravity.google/docs/settings and /docs/cli/gcli-migration | Global `~/.gemini/config/mcp_config.json` and workspace `.agents/mcp_config.json` paths; `serverUrl` is the current remote URL key | The `headers` field and `${SHUNT_SHIM_TOKEN}` interpolation (the documented example uses `env`); the claim that SSE is unsupported (the migration page shows an `/sse` URL under `serverUrl`) |
+| Antigravity CLI (`agy-cli`), docs at antigravity.google/docs/settings and /docs/cli/gcli-migration | Global `~/.gemini/config/mcp_config.json` and workspace `.agents/mcp_config.json` paths; `serverUrl` is the current remote URL key | The `headers` field and `${SHUNT_SHIM_TOKEN}` interpolation (the documented example uses `env`); whether `/sse` URLs work under `serverUrl` (the migration page shows an `/sse` URL under `serverUrl`) |
 | Claude Code, docs at code.claude.com/docs/en/mcp (Context7 `/websites/code_claude`) | `claude mcp add --transport http <name> <url> --header "Authorization: Bearer ..."`; `${VAR}` expansion in `.mcp.json` `url` and `headers`; `type: "http"` | `${VAR}` expansion for values passed to `--header` or stored in `~/.claude.json`; the SSE transport is documented as deprecated, so prefer `/mcp` |
-| OpenCode, docs at opencode.ai/docs/mcp-servers and /docs/config (Context7 `/websites/opencode_ai`) | `type: "remote"`, `url`, `headers`, and `{env:VAR}` substitution (unset variables become an empty string) | `enabled: true` (the published schema lists `disabled`); the legacy `mcpServers` block, which I found nowhere in the docs and which uses `${VAR}` instead of `{env:VAR}` |
+| OpenCode, docs at opencode.ai/docs/mcp-servers and /docs/config (Context7 `/websites/opencode_ai`) | `type: "remote"`, `url`, `headers`, and `{env:VAR}` substitution (unset variables become an empty string) | `enabled: true` (the published schema lists `disabled`); the legacy `mcpServers` compatibility block and its `${VAR}` syntax (not found in the current OpenCode docs) |
 | OpenAI Codex CLI, source at openai/codex `codex-rs/config` (Context7 `/openai/codex`, latest indexed tag `rust-v0.165.0`) | `[mcp_servers.<name>]` with `url`, `bearer_token_env_var`, `env_http_headers` (value is the environment variable name), `startup_timeout_sec`, `tool_timeout_sec`, `enabled` | Behavior of the specific version a reader has installed |
 
 The `/mcp` and `/sse` smoke tests in section 5.2, and every client registration against this gateway, are unverifiable today: `main` has no MCP transport and no `/v1/search` ingress. The request and response envelopes shown are the intended contract.
