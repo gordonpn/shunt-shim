@@ -47,7 +47,9 @@ on the owner's account. Free usage is capacity-limited and is not an SLA.
 | Existing generative upstream | Structured JSON classification can reuse existing text-model access, but still generates tokens and needs output validation; a model-written confidence number is not automatically a calibrated distribution. Google's documentation explicitly contrasts these uses. [Decision vs structured output](https://aistudio.google.com/docs/decisions-api#when-to-use) | Compare using actual configured account/model allowance, not Gemini Decision quotas. Additional classifier requests consume existing upstream quota. [Project contract](../COMPATIBILITY.md) |
 
 The OpenRouter native endpoint is **`POST https://openrouter.ai/api/alpha/decisions`**,
-with bearer authentication; it is not `/chat/completions` and is explicitly alpha.
+with bearer authentication; it is OpenRouter's native alpha endpoint, distinct
+from `/chat/completions` and from the proposed `$SHUNT_BASE_URL/v1/decisions`
+gateway endpoint.
 Its public reference demonstrates raw `fetch`, `state`, model and typed questions.
 Response usage may include `input_tokens`, `output_tokens` and cost; do not copy
 Google's zero-output assumption into every adapter.
@@ -150,7 +152,10 @@ execution/access blocker, not evidence that the documented model is unavailable.
 ## Candidate gateway contract (unimplemented)
 
 Use an independent schema version and explicit model selector initially:
-`decision-gemini-v1`, not an alias that silently swaps semantics. Text only,
+`decision-gemini-v1`, not an alias that silently swaps semantics. In this
+contract, `"model": "decision-gemini-v1"` is the gateway's internal selector,
+mapped by the gateway to an upstream provider model
+(`"actual_model": "gemini-decision-1"`). Text only,
 JSON object bodies, 32 KiB UTF-8 request cap, at most 10 independent questions,
 2–10 options/levels, bounded nonempty instructions and unique question IDs.
 These are proposed gateway limits, deliberately below provider maxima; exact
@@ -268,8 +273,9 @@ async function decide(base: string, token: string, input: unknown, signal: Abort
 **No empirical comparison results exist yet.** Binary/choice/score behavior,
 accuracy, false-positive/negative rates, calibration, p50/p95 latency, token
 usage, cost and failure handling are **not measured**. Documentation establishes
-feasibility, not economic benefit. Issue #168's 50-case dataset and live
-prototype acceptance items remain incomplete.
+feasibility, not economic benefit. PR #207 supplies the 50-case synthetic dataset
+(`scripts/eval/decision-cases.jsonl`), while the live prototype, native REST
+path, three-way runs, and independent review remain open under #168.
 
 For a reproducible next evaluation, commit a fixed, reviewed JSONL dataset of
 at least 50 non-sensitive cases, ten each for intent, provider selection,
