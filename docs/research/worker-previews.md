@@ -160,7 +160,8 @@ To maintain strict isolation between pull request previews, production deploymen
 | `CLOUDFLARE_PRODUCTION_API_TOKEN` | GitHub Environment Secret (`production` environment, restricted to `main`) | `production` job in `.github/workflows/deploy.yml` | Scoped to the production Cloudflare account: `Account -> Workers Scripts: Edit`, `Account -> Account Settings: Read`, plus `Zone -> Zone: Read`, `Zone -> Workers Routes: Edit`, and `Zone -> DNS: Edit` for `gordon-pn.com`. Inaccessible to PR jobs. |
 | `CLOUDFLARE_PRODUCTION_ACCOUNT_ID` | GitHub Environment Secret (`production` environment, restricted to `main`) | `production` job in `.github/workflows/deploy.yml` | Account ID of the production Cloudflare account. |
 | `PRODUCTION_GATEWAY_TOKENS` | GitHub Environment Secret (`production` environment, restricted to `main`) | `production` job in `.github/workflows/deploy.yml` (`GATEWAY_TOKENS` env) | Production gateway bearer token for post-deploy verification on `main`. |
-| `DEEPSEEK_API_KEY` | GitHub Repository Secret | `.github/workflows/deepseek-review.yml` and `.github/workflows/pr-agent.yml` | Retained in repository secrets per `AGENTS.md`. Both reviewer workflows skip cleanly when `DEEPSEEK_API_KEY` is absent and never check out or execute untrusted PR code with the secret. |
+| `REVIEW_GATEWAY_TOKEN` | GitHub Repository Secret | `.github/workflows/deepseek-review.yml` and `.github/workflows/pr-agent.yml` | Preferred reviewer credential per current `AGENTS.md`: calls `https://shunt-shim.gordon-pn.com/v1` with model `fast`. Keep separate from deployment credentials. |
+| `DEEPSEEK_API_KEY` | GitHub Repository Secret | Same reviewer workflows, direct-provider fallback | Used only when `REVIEW_GATEWAY_TOKEN` is absent. Both workflows skip cleanly when **both** reviewer credentials are absent; neither executes untrusted PR code with reviewer secrets. |
 
 ### 5.3 Preserving Workflow Prerequisite Gating
 
