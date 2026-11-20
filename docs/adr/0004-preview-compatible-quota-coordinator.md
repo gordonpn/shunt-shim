@@ -103,6 +103,10 @@ coordinator receives reservation metadata and limits, not provider credentials,
 bearer tokens, prompts, or response bodies. Reviewer credentials stay in repository
 secrets under the existing `AGENTS.md` policy.
 
+The coordinator stores and enforces the authoritative monthly and provider budget
+limits. It ignores or rejects any caller-supplied limit that differs from the
+stored limit, including limits sent by older gateway versions during rollout.
+
 Before any card-backed provider dispatch, require a successful durable reservation.
 Missing bindings, coordinator timeouts, unavailable code, protocol mismatches,
 storage errors, or exhausted Cloudflare limits fail closed for that provider.
@@ -141,14 +145,28 @@ Required implementation and rollout gates:
 3. Measure coordinator latency, requests, duration, storage operations, and retained
    state against both accounts' allowances. Rehearse compatible gateway/coordinator
    rollback and lifecycle-change recovery in preview before production provisioning.
-   Release a compatible production coordinator first, then the gateway, with
-   post-deploy ingress and quota checks and no unsupervised paid-provider probes.
+   Because `wrangler.jsonc` currently sets `"preview_urls": true` (and Version URLs
+   are public when enabled), disable production Version URLs (`"preview_urls": false`
+   in production configuration while keeping `"workers_dev": true` for
+   `.github/scripts/deploy-production.sh` verification) or retire old gateway
+   versions that still hold direct paid-provider bindings before the coordinator
+   takes over reservations, and confirm the live production Version URL setting
+   before the first quota-enabled release. Release a compatible production
+   coordinator first, then the gateway, with post-deploy ingress and quota checks
+   and no unsupervised paid-provider probes.
 
-Gateway rollback preserves the coordinator namespace and spend ledger. Roll back
-coordinator code only to a protocol/schema-compatible version; Cloudflare cannot
-roll back across a Durable Object lifecycle change [5]. Use a forward repair for
-such changes, keeping card-backed dispatch disabled until accounting is reliable.
-Existing automatic gateway rollback does not roll back the coordinator or its data.
+Gateway rollback preserves the coordinator namespace and spend ledger, but
+preserving the ledger alone does not prevent unaccounted spend if an older
+gateway version still dispatches without coordinator reservations. Because
+`.github/scripts/deploy-production.sh` automatically runs `just rollback` on
+post-deploy ingress failure, require a quota-compatible rollback target or
+disable card-backed dispatch (`FREE_ONLY_POLICY=true` /
+`ALLOW_CARD_BACKED_PROVIDERS=false`) before restoring an older gateway version
+that lacks coordinator reservation enforcement. Roll back coordinator code only to
+a protocol/schema-compatible version; Cloudflare cannot roll back across a
+Durable Object lifecycle change [5]. Use a forward repair for such changes,
+keeping card-backed dispatch disabled until accounting is reliable. Existing
+automatic gateway rollback does not roll back the coordinator or its data.
 
 Preview aliases and old version URLs can continue using the shared coordinator
 after PR closure. Define expiration of synthetic test records and reservation
