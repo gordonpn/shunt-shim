@@ -52,7 +52,8 @@ Neither coverage nor CodeQL currently validates gateway code.
 
 DeepSeek Review and PR-Agent run when a human opens a non-draft
 same-repository PR, marks a draft ready for review, or updates its head branch
-(`synchronize`). PR-Agent enables `handle_push_trigger` with `/review` in `push_commands`.
+(`synchronize`). The PR-Agent workflow environment enables `handle_push_trigger`
+with `/review` in `push_commands`, including before repository settings are merged.
 Merge-only updates are reviewed as head updates; bot-triggered updates are excluded.
 Both prefer the `REVIEW_GATEWAY_TOKEN` repository secret to route reviews through
 `https://shunt-shim.gordon-pn.com/v1` with model alias `fast`. When that token is

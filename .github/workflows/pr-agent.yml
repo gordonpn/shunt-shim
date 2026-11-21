@@ -31,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      GITHUB_ACTION_CONFIG__HANDLE_PUSH_TRIGGER: "true"
+      GITHUB_ACTION_CONFIG__PUSH_COMMANDS: '["/review"]'
+      GITHUB_ACTION_CONFIG__PUSH_TRIGGER_IGNORE_MERGE_COMMITS: "false"
       REVIEW_GATEWAY_TOKEN: ${{ secrets.REVIEW_GATEWAY_TOKEN }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     steps:

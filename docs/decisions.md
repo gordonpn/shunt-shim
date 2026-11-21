@@ -9,6 +9,8 @@ Both reviewers run on head updates as well as creation and readiness. Comment ru
 fetch PR metadata before evaluating eligibility because comment payloads omit the
 head repository. Missing credentials fail an eligible review, making configuration
 failures visible. Gateway credentials retain precedence over direct DeepSeek.
+PR-Agent push settings live in the workflow environment because its repository
+settings loader reads the default branch during a PR review.
 
 Workflow-only filtering cannot establish comment PR origin. The GitHub API lookup
 provides that check. Provider call errors propagate through the pinned actions,
