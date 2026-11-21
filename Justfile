@@ -128,7 +128,7 @@ test-deepseek-review-prompt:
     bash .github/scripts/test-deepseek-review-prompt.sh
 
 # Validate repository automation without application code or secrets
-check-workflows: lint-workflows test-secrets test-deploy-scripts test-deepseek-review-prompt test-sync-secrets
+check-workflows: lint-workflows test-secrets test-deploy-scripts test-deepseek-review-prompt test-reviewers test-sync-secrets
     sed -n '/"compatibility_flags"[[:space:]]*:[[:space:]]*\[/,/\]/p' wrangler.jsonc | grep -Eq '^[[:space:]]*"enable_request_signal"'
     shellcheck .github/scripts/*.sh
     git diff --check $(git hash-object -t tree /dev/null)
@@ -164,3 +164,7 @@ review-workflows:
 review-code:
     ocr delegate preview --format json
     ocr delegate rule --format json package.json tsconfig.json biome.json wrangler.jsonc vitest.config.ts src/*.ts test/*.ts scripts/*.ts
+
+# Verify reviewer eligibility and credential failures
+test-reviewers:
+    bash .github/scripts/test-review-credentials.sh

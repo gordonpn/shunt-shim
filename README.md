@@ -6,6 +6,8 @@ Status: Cloudflare Worker service implemented with reproducible quality gates. S
 
 The goal is to let DeepSeek Review, OpenCodeReview, and PR-Agent use one endpoint without client code changes. Compatibility requires deployed evidence for all three, including OpenCodeReview's tool-call round trip. See the [pinned client sources and contract](docs/COMPATIBILITY.md).
 
+Repository reviewers run on eligible PR creation, readiness, and branch updates. Missing reviewer credentials fail the check. See [review automation](docs/AUTOMATION.md) for routing and fork/bot exclusions.
+
 ```
 Client -> Gateway (fast alias) -> Groq (Primary: qwen/qwen3.8-27b)
                                 -> Google AI Studio (Fallback: gemini-2.5-flash-lite)
