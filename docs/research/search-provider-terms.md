@@ -60,7 +60,9 @@ cannot prevent provider or client-transcript retention.
    wrapper/competitive-use and publisher-content questions with the provider.
 2. Integrate the approved matrix into `docs/FREE_TIERS.md` after PR #178; preserve
    endpoint/plan exceptions and distinguish permission, prohibition and unknown.
-3. Reconcile with #158's threat model and the implemented search pipeline. Verify
+3. After the search ingress, adapters and diagnostics are implemented, reconcile
+   with #158's threat model and audit the shipped search pipeline. Until then,
+   record these runtime paths as unverified. Verify
    no result/query content enters logs, tracing, retry buffers, persisted caches,
    shared customer stores, analytics or retained test fixtures contrary to terms.
 4. Define attribution/provenance rendering and deletion/retention rules per
