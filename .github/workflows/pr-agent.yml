@@ -2,7 +2,7 @@ name: PR-Agent
 
 on:
   pull_request:
-    types: [opened, ready_for_review]
+    types: [opened, ready_for_review, synchronize]
   issue_comment:
     types: [created, edited]
 
@@ -17,6 +17,8 @@ jobs:
     if: |
       github.event.sender.type != 'Bot' &&
       github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.user.type != 'Bot' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       ((github.event_name == 'pull_request' &&
         !github.event.pull_request.draft &&
         github.event.pull_request.head.repo.full_name == github.repository) ||
@@ -32,8 +34,23 @@ jobs:
       REVIEW_GATEWAY_TOKEN: ${{ secrets.REVIEW_GATEWAY_TOKEN }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Check PR eligibility
+        id: eligibility
+        run: bash .github/scripts/check-review-pr.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Require reviewer credentials
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: bash .github/scripts/check-review-credentials.sh
+
       - name: PR Agent Action (Gateway)
-        if: env.REVIEW_GATEWAY_TOKEN != ''
+        if: steps.eligibility.outputs.eligible == 'true' && env.REVIEW_GATEWAY_TOKEN != ''
         uses: docker://pragent/pr-agent:github_action@sha256:31b9aac6ab067bada9a0c1b001d30ebc500ea4487e00a93c18c59b9ef5fa66db
         env:
           CONFIG__MODEL: "openai/fast"
@@ -46,7 +63,7 @@ jobs:
           OPENAI__API_BASE: "https://shunt-shim.gordon-pn.com/v1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: PR Agent Action (Direct DeepSeek fallback)
-        if: env.REVIEW_GATEWAY_TOKEN == '' && env.DEEPSEEK_API_KEY != ''
+        if: steps.eligibility.outputs.eligible == 'true' && env.REVIEW_GATEWAY_TOKEN == '' && env.DEEPSEEK_API_KEY != ''
         uses: docker://pragent/pr-agent:github_action@sha256:31b9aac6ab067bada9a0c1b001d30ebc500ea4487e00a93c18c59b9ef5fa66db
         env:
           CONFIG__MODEL: "deepseek/deepseek-v4-flash"

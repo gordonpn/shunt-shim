@@ -1,0 +1,10 @@
+[
+  {"name":"eligible", "patch":{}, "expected":true},
+  {"name":"draft", "patch":{"draft":true}, "expected":false},
+  {"name":"closed", "patch":{"state":"closed"}, "expected":false},
+  {"name":"fork", "patch":{"head":{"repo":{"full_name":"contributor/fork"}}}, "expected":false},
+  {"name":"deleted fork", "patch":{"head":{"repo":null}}, "expected":false},
+  {"name":"bot author", "patch":{"user":{"login":"automation[bot]","type":"Bot"}}, "expected":false},
+  {"name":"dependabot", "patch":{"user":{"login":"dependabot[bot]","type":"Bot"}}, "expected":false},
+  {"name":"missing author type", "patch":{"user":{"type":null}}, "expected":false}
+]
