@@ -564,11 +564,22 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
           throw new Error(`Unexpected request content: ${content}`);
         });
 
-        const start = (content: string, signal: AbortSignal) =>
-          postChatWithSignal(
-            { model: "fast", messages: [{ role: "user", content }] },
-            signal,
-          );
+        const start = async (
+          content: string,
+          signal: AbortSignal,
+        ): Promise<Response> => {
+          const started = content === "request A" ? startedA : startedB;
+          try {
+            return await postChatWithSignal(
+              { model: "fast", messages: [{ role: "user", content }] },
+              signal,
+            );
+          } finally {
+            started.reject(
+              new Error(`${content} completed before upstream start`),
+            );
+          }
+        };
         const pending: Promise<Response>[] = [];
         try {
           // Exercise both arrival orders without relying on asynchronous auth.
