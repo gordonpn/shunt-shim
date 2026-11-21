@@ -50,7 +50,7 @@ describe("offline search evaluation corpus", () => {
     ).toEqual([...categories].sort());
   });
 
-  it("uses unique canonical public hostnames without URLs or paths", () => {
+  it("uses unique canonical hostname syntax without URLs or paths", () => {
     for (const entry of readQueries()) {
       const domains = entry.expected_domains as string[];
       expect(new Set(domains).size).toBe(domains.length);
