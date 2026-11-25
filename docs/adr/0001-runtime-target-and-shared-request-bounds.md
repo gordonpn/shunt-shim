@@ -34,7 +34,7 @@ Key constraints:
    - **Shared Context Ceiling**: 128,000 tokens combined prompt and requested output limit (`prompt_tokens + max_completion_tokens <= 128,000`). Bounded by Groq context on primary model (`qwen/qwen3.8-27b`, 128k context; or `llama-3.3-70b-versatile`). PR-Agent configured with `config.custom_model_max_tokens=128000`. Combined token requests exceeding 128k return HTTP 400 `context_length_exceeded` before upstream dispatch.
    - **Output Limit**: 8,192 tokens max completion tokens (`max_tokens` or `max_completion_tokens`), matching Groq and Gemini output ceilings.
    - **Timeouts and Deadlines**:
-     - Upstream Connect / Header Timeout: 5,000 ms (5s) per attempt (superseded from initial 60s proposal; see MVP Amendment).
+     - Upstream Primary Connect / Header Timeout: 5,000 ms (5s) on Attempt 1 (superseded from initial 60s proposal; see MVP Amendment). Without streaming SSE (`stream: false`), HTTP headers return only after full completion, so Attempt 2 (Fallback) runs up to the remaining 60s total deadline by default.
      - Total Gateway Deadline: 60,000 ms (60s) bounded across all attempts (superseded from initial 150s proposal; see MVP Amendment).
      - Client and Ingress Alignment: Client timeouts exceed the gateway total deadline (DeepSeek Review default 180s, OpenCodeReview default 300s, PR-Agent default 300s). Cloudflare Workers edge network timeout (180-300s) exceeds the 60s gateway deadline to guarantee delivery of HTTP 504 responses.
      - Client Disconnect Cancellation: Worker environment enables `enable_request_signal` compatibility flag, propagating client disconnection through `Request.signal` to abort active upstream requests via `AbortController`.

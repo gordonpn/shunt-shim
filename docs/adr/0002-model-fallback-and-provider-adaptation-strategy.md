@@ -42,7 +42,7 @@ Three fallback architectures were evaluated:
    - **Response Commitment Point**: (MVP note: Streaming SSE is deferred to post-MVP and rejected with HTTP 400 `unsupported_parameter`.) Fallback is permitted strictly before downstream response headers and body bytes are flushed. Once committed, provider selection is locked.
    - **Conservative Token Estimation**: Guard context ceilings using a lightweight character/byte heuristic rather than bundling heavy WASM TikToken/BPE tokenizer dependencies into edge isolates.
    - **Rate Limit and Failure Header Normalization**: Extract `Retry-After` on HTTP 429 responses to return to clients.
-   - **Cancellation and Bounded Deadlines**: Combine downstream `Request.signal` with abort controllers for the 5s per-attempt timeout and 60s total gateway deadline using linked signals (`AbortSignal.any()`). Client disconnects, attempt timeouts, and total deadline expirations immediately abort active upstream `fetch` calls.
+   - **Cancellation and Bounded Deadlines**: Combine downstream `Request.signal` with abort controllers for the 5s primary timeout, fallback execution up to the remaining deadline (unless overridden), and 60s total gateway deadline using linked signals (`AbortSignal.any()`). Client disconnects, attempt timeouts, and total deadline expirations immediately abort active upstream `fetch` calls.
 
 ## Rationale and Alternatives Considered
 
