@@ -3,7 +3,7 @@
 Research for [#64](https://github.com/gordonpn/shunt-shim/issues/64). Checked
 2026-11-25 against OmniRoute commit
 [`332e93b95be914b8258ff96f3514ee60b7788c4e`](https://github.com/cheaper-inference/OmniRoute/commit/332e93b95be914b8258ff96f3514ee60b7788c4e)
-(`v3.8.55`, MIT license). This is a source review complementing pending
+(`3.8.54`, MIT license). This is a source review complementing pending
 [gateway survey audit PR #209](https://github.com/gordonpn/shunt-shim/pull/209),
 [LiteLLM research PR #177](https://github.com/gordonpn/shunt-shim/pull/177),
 and [CLIProxyAPI research PR #176](https://github.com/gordonpn/shunt-shim/pull/176)
@@ -34,20 +34,20 @@ stateless isolate architecture ([docs/ARCHITECTURE.md](../ARCHITECTURE.md)).
 
 ### 2. Guarded bounded-JSON outbound transport
 
-In [`open-sse/services/decision/transport.ts`](https://github.com/cheaper-inference/OmniRoute/blob/332e93b95be914b8258ff96f3514ee60b7788c4e/open-sse/services/decision/transport.ts)
-and [`open-sse/handlers/openaiDecisions.ts`](https://github.com/cheaper-inference/OmniRoute/blob/332e93b95be914b8258ff96f3514ee60b7788c4e/open-sse/handlers/openaiDecisions.ts),
-OmniRoute applies defense-in-depth protections around upstream HTTP calls:
+In [`open-sse/services/usage/grokCli.ts`](https://github.com/cheaper-inference/OmniRoute/blob/332e93b95be914b8258ff96f3514ee60b7788c4e/open-sse/services/usage/grokCli.ts),
+`readBoundedJson` reads successful Grok Build usage responses through
+`response.body.getReader()`, rejects a declared content length above
+`GROK_BUILD_MAX_RESPONSE_BYTES` (256 KiB), and cancels the reader when streamed
+bytes exceed that ceiling. It then parses JSON through a schema, returning null
+for invalid JSON/schema data. `fetchGrokBuildJson` uses `redirect: "error"` and
+an explicit timeout; failures return null. This is a usage-fetch helper, not a
+native decision endpoint or a general guarantee about every upstream call.
 
-- **Bounded stream reading:** `readBoundedJson` consumes `response.body.getReader()`
-  with a strict byte ceiling (`MAX_DECISION_RESPONSE_BYTES`, 64 KB), canceling
-  the reader immediately on overflow instead of calling unbounded `response.json()`.
-- **No automatic redirects:** `defaultDecisionTransport` passes both
-  `redirect: "error"` and `allowRedirect: false` with `retry: false` so upstream
-  responses cannot bounce authenticated `Authorization: Bearer` requests to
-  unintended hosts.
-- **Status-only failure reporting:** `cancelBody` drains/cancels non-2xx bodies
-  and returns status/reason codes (`timeout`, `http_error`, `invalid_response`,
-  `network_error`) without propagating echoed prompts, URLs, or upstream keys.
+Separately, [`src/lib/providers/validation/headers.ts`](https://github.com/cheaper-inference/OmniRoute/blob/332e93b95be914b8258ff96f3514ee60b7788c4e/src/lib/providers/validation/headers.ts)
+passes `allowRedirect: false` and `retry: false` to `safeOutboundFetch` for
+provider-validation probes. These are reusable boundary ideas; Shunt Shim must
+implement and test its own bounded completion reader, cancellation and safe
+error mapping rather than importing these provider-specific helpers.
 
 ### 3. Strict zero-cost fail-closed filter and catalog hygiene
 
@@ -91,7 +91,11 @@ keep search and content extraction cleanly separated:
 
 - `search.ts` clamps per-provider timeouts inside a bounded whole-request budget
   (`clampSearchTimeoutMs` / `resolveGlobalTimeoutMs`) and stops automatic
-  failover on `NON_RETRIABLE` client/auth statuses (`400`, `401`, `403`, `404`).
+  failover on `NON_RETRIABLE` client/auth statuses (`400`, `401`, `403`, `404`)
+  ordinarily. `isFailoverStatus` permits those statuses when a configured
+  SearXNG primary has `primaryWhenConfigured: true`; other failover gates
+  still apply. This provider-specific exception is not a proposal to broaden
+  Shunt Shim completion failover.
 - `webFetch.ts` enforces compile-time exhaustiveness (`const _exhaustive: never`)
   across fetch executors and isolates specialized sources (such as `context7`)
   behind `EXPLICIT_ONLY_WEB_FETCH_PROVIDERS` so generic auto-fallback never
@@ -105,9 +109,8 @@ keep search and content extraction cleanly separated:
 | Adopt | Explicit `redirect: "error"` on outbound authenticated fetches | Prevents redirect responses from leaking upstream bearer keys or bypassing target URL expectations. |
 | Adopt | Explicit `usage` field allowlist and plain-object check (`!Array.isArray`) | Prevents arbitrary provider-specific usage extensions from breaking strict OpenAI Python/Pydantic clients. |
 | Adopt | Pure fail-closed quota filter (`SAFE \| EXHAUSTED \| UNKNOWN`, staleness TTL, `hardStopGuaranteed` never defaulted) | Fits Shunt Shim's strict `freeOnly` and testable pure-function standards for `src/search/quota/`. |
-| Adopt | Separated search vs fetch contracts with explicit-only provider sets and `NON_RETRIABLE` client statuses | Directly informs [#235](https://github.com/gordonpn/shunt-shim/issues/235), [#231](https://github.com/gordonpn/shunt-shim/issues/231), and `src/search/router.ts`. |
+| Adopt | Separated search vs fetch contracts with explicit-only provider sets and provider-specific search failover policy | Directly informs [#235](https://github.com/gordonpn/shunt-shim/issues/235), [#231](https://github.com/gordonpn/shunt-shim/issues/231), and `src/search/router.ts`. |
 | Defer | Additional free-tier LLM provider leads (`FREE_TIERS.md` catalog) | Useful discovery input for [#211](https://github.com/gordonpn/shunt-shim/issues/211), but every limit and ToS claim requires independent primary-source checks. |
-| Defer | Native `/v1/decisions` proxy pattern (`openaiDecisions.ts`) | Reference contract only if empirical spike [#168](https://github.com/gordonpn/shunt-shim/issues/168) establishes a free-tier native decision endpoint. |
 | Avoid | Node.js/Next.js/SQLite/Electron runtime, `fallbackPolicy.ts` module-level mutable maps, OAuth scraping, and advisory-only ToS flags | Conflicts with Cloudflare Workers stateless isolates, zero-DB architecture, official API-key boundaries, and fail-closed policy. |
 | Avoid | Prompt/output token compression (`RTK + Caveman`) | Mutating prompts or tool/diff payloads risks breaking deterministic code review fidelity and compatibility contracts. |
 
@@ -146,7 +149,9 @@ against these patterns:
 
 ## Evidence and limitations
 
-Inspected pinned source files via the GitHub API on 2026-11-25 against OmniRoute
+Inspected pinned source files via the GitHub API on 2026-11-25; corrected
+version, transport citations and search failover semantics against the same
+pinned source archive on 2026-11-26. Review targets are OmniRoute
 commit `332e93b95be914b8258ff96f3514ee60b7788c4e` and Shunt Shim commit
 `00ec75b`. No OmniRoute package, CLI binary, SQLite schema, or compression filter
 was installed, executed, or benchmarked, and none of the third-party provider
