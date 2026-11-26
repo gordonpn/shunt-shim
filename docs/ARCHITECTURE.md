@@ -75,7 +75,7 @@ The request pipeline runs the following validation and routing steps:
        v
 7. Primary Dispatch -----------> [Attempt primary provider (default: Groq qwen/qwen3.8-27b) with 5s timeout]
        |
-       +--> [On 429 / 503 / Timeout / Network Error] -> Fallback provider (default: Gemini gemini-2.5-flash-lite)
+       +--> [On 413 / 429 / 503 / 530 / Timeout / Network Error] -> Fallback provider (default: Gemini gemini-2.5-flash-lite)
        |
        v
 8. Response Normalization -----> [Normalize JSON body and extract usage/tools]
@@ -94,7 +94,7 @@ Incoming HTTP requests are routed through Hono. Supported routes are `GET /v1/mo
 The `diagnosticsMiddleware` captures request timing, extracts an existing `x-request-id` header or generates a UUID, attaches it to the response header, and emits a structured JSON diagnostic event upon completion adhering to the safe allowlist.
 
 ### Stage 3: Authentication
-The gateway validates credentials from either `Authorization: Bearer <token>` or `x-api-key: <token>`. Both headers must match the single random secret in `GATEWAY_TOKENS`. If both headers are supplied, they must match each other. Missing, empty, or invalid tokens return HTTP 401 Unauthorized. Provider keys are never sent to clients.
+The gateway validates credentials from either `Authorization: Bearer <token>` or `x-api-key: <token>`. Supplied credentials must match one of the configured comma-separated secrets in `GATEWAY_TOKENS`. If both headers are supplied on the same request, they must match each other. Missing, empty, or invalid tokens return HTTP 401 Unauthorized. Provider keys are never sent to clients.
 
 ### Stage 4: Body Size Limit
 Requests are read with a 10 MB limit (`10,485,760` bytes). Payloads exceeding this ceiling return HTTP 413 `payload_too_large` before JSON parsing.
@@ -107,10 +107,10 @@ Streaming completions are deferred beyond the MVP. If the parsed request body co
 
 ### Stage 7: Upstream Dispatch and Bounded Fallback
 - **Attempt 1 (Primary):** Dispatches to the configured primary provider (default: Groq `qwen/qwen3.8-27b` using `https://api.groq.com/openai/v1/chat/completions`). A 5s connection and header timeout aborts stagnant handshakes.
-- **Eligible Failures:** Upstream HTTP 429 (rate limit), HTTP 503 (service unavailable), connection/header timeout, or network fetch failure trigger fallback.
+- **Eligible Failures:** Upstream HTTP 413 (provider payload/TPM limit exceeded), HTTP 429 (rate limit), HTTP 503 (service unavailable), HTTP 530 (Cloudflare Origin/DNS error), connection/header timeout, or network fetch failure trigger fallback.
 - **Attempt 2 (Fallback):** Dispatches to the configured fallback provider (default: Google AI Studio `gemini-2.5-flash-lite` using `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`). Setting `PRIMARY_PROVIDER=gemini` swaps provider order at runtime.
 - **Wall-Clock Deadline:** The gateway enforces a strict 60s total request deadline across all attempts. If the deadline expires, in-flight fetches are aborted immediately, returning HTTP 504 `gateway_timeout`.
-- **Pre-dispatch Rejections:** Pre-dispatch failures (HTTP 400, 401, 404, 405, 413) omit provider and model metadata rather than fabricating uncontacted provider names.
+- **Pre-dispatch Rejections:** Pre-dispatch failures (HTTP 400, 401, 404, 405, and inbound 10 MB body-limit HTTP 413) omit provider and model metadata rather than fabricating uncontacted provider names.
 
 ### Stage 8: Protocol Normalization
 Both Groq and Google AI Studio provide standard OpenAI-compatible `/chat/completions` endpoints. Upstream JSON responses are parsed, validated, and normalized to ensure required completion IDs, created timestamps, choices, tool call arguments, finish reasons, and usage objects are well-formed before returning to the client.
@@ -133,6 +133,6 @@ By default, Groq serves as the primary provider and Google AI Studio serves as t
 The following proposals are deferred beyond the MVP:
 - **Streaming Responses (SSE):** Incremental SSE relay is deferred to post-MVP. Requests specifying `stream: true` return HTTP 400.
 - **Additional Aliases:** `deep` and `reasoning` virtual aliases are deferred.
-- **Third-Party Providers:** OpenRouter, Cloudflare Workers AI, and Vercel AI Gateway are deferred.
+- **Third-Party Providers & Paid Last-Resort Fallback:** OpenRouter, Cloudflare Workers AI, Vercel AI Gateway, configurable multi-provider `FALLBACK_ORDER`, and optional `DEEPSEEK_API_KEY` reserved strictly as a last-resort paid fallback after free-tier providers fail are deferred beyond the MVP.
 - **Multi-Tenant Catalogs & Priority Tiers:** No multi-tenant token IDs (`sk-proj-*`) or background priority degradation are implemented.
 - **Quota Storage:** No Cloudflare KV namespaces, Durable Objects, or external databases are used.

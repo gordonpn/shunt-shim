@@ -77,21 +77,20 @@ just generate-token
    The local edge server listens by default at `http://127.0.0.1:8787`.
 
 ### Coordinated Secret Rotation
-Because the MVP enforces single-token authentication via exact string comparison in `authMiddleware`, rotating the gateway secret causes active clients presenting the old token to receive HTTP 401 until their configuration is updated. Overlapping multi-token support is deferred to post-MVP.
+`GATEWAY_TOKENS` accepts comma-separated bearer tokens, allowing overlapping zero-downtime rotation and independent revocation of client tokens (for example separating `PRODUCTION_GATEWAY_TOKENS` from a PR review token).
 
-To execute a coordinated token rotation:
-1. Generate a new secret: `just generate-token`.
-2. Prepare updated client configurations in downstream runners (for example, repository secrets for DeepSeek Reviewer, OpenCodeReview, or PR-Agent).
-3. Update the Cloudflare Workers secret:
+To rotate a token without downtime:
+1. Generate a replacement secret: `just generate-token`.
+2. Add the new secret first alongside every still-active token in `GATEWAY_TOKENS` (`"<new-token>,<active-token>"`) so existing clients keep authenticating during cutover, and push it to the Worker:
    ```bash
    pnpm exec wrangler secret put GATEWAY_TOKENS
    ```
-   Enter the new token at Wrangler's prompt, or update `.dev.vars` and run `just provision-secrets`.
-4. Immediately apply the new bearer token to downstream client configurations.
-5. Verify ingress connectivity and authentication with the new credential:
+   Or update `.dev.vars` and run `just provision-secrets`.
+3. Update downstream client configurations to use the new secret and verify via `.dev.vars` (`GATEWAY_TOKENS` first entry `<new-token>`) without passing secrets as CLI arguments:
    ```bash
    just verify-ingress https://shunt-shim.<subdomain>.workers.dev
    ```
+4. Remove the retired token from `GATEWAY_TOKENS` and re-run `just provision-secrets` (or `wrangler secret put GATEWAY_TOKENS`) so the old secret immediately returns HTTP 401.
 
 ## 3. Production Deployment to Cloudflare Workers
 
@@ -131,9 +130,9 @@ To roll back immediately to the previous deployment if an issue arises:
 just rollback
 ```
 
-To roll back to a specific deployment version ID:
+To roll back to a specific Worker version ID (not the deployment ID):
 ```bash
-just rollback <deployment-id>
+just rollback <worker-version-id>
 ```
 
 ### Step 5: Preview Deployments and Automated Delivery
@@ -179,6 +178,20 @@ just verify-ingress-live https://shunt-shim.<subdomain>.workers.dev
 just verify-ingress-live https://shunt-shim.gordon-pn.com
 ```
 
+### Maximum-body and deployment evidence
+
+```bash
+# Set the actual URL printed by deployment before running these probes.
+export BASE_URL="https://shunt-shim.<your-subdomain>.workers.dev"
+just verify-ingress-resource "$BASE_URL"
+```
+
+This opt-in probe parses an exact 10 MB JSON body and expects streaming rejection
+before upstream dispatch. It does not consume provider quota. Record live probe,
+resource, disconnect/deadline, and rollback outcomes using the
+[deployment evidence checklist](DEPLOYMENT_EVIDENCE.md). Do not mark #38 complete
+from mocked tests or health checks alone. SSE streaming remains outside the MVP.
+
 ### Automated Ingress Probes Executed
 The `verify-ingress` script executes the following checks:
 1. `GET /`: Unauthenticated root probe returns HTTP 200 `{ status: "ok", service: "shunt-shim" }` and verifies `x-request-id` response header presence.
@@ -196,20 +209,26 @@ The `verify-ingress` script executes the following checks:
 
 ### Manual Smoke Testing via curl
 
-Export the configured gateway token in the active shell:
+Set the actual URL printed by deployment and enter the gateway token without
+saving it in shell history (Bash):
 ```bash
-export GATEWAY_TOKENS="$(sed -n 's/^GATEWAY_TOKENS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' .dev.vars)"
+export BASE_URL="https://shunt-shim.<your-subdomain>.workers.dev"
+read -rsp 'Gateway token: ' GATEWAY_TOKENS; echo
+export GATEWAY_TOKENS
 ```
+
+The examples below use this deployed URL; set `BASE_URL=http://127.0.0.1:8787`
+to test locally. They use the gateway token, never upstream provider keys.
 
 #### Verify Unauthenticated Health Endpoints
 ```bash
-curl -i -s "http://127.0.0.1:8787/health"
+curl -i -s "${BASE_URL}/health"
 ```
 Expected response: HTTP 200 with `{"status":"ok","service":"shunt-shim"}`.
 
 #### Verify Virtual Models Catalog
 ```bash
-curl -s -X GET "http://127.0.0.1:8787/v1/models" \
+curl -s -X GET "${BASE_URL}/v1/models" \
   -H "Authorization: Bearer ${GATEWAY_TOKENS}" | jq .
 ```
 Expected response:
@@ -224,7 +243,7 @@ Expected response:
 
 #### Test Non-Streaming Chat Completion (`fast` alias)
 ```bash
-curl -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
+curl --max-time 65 -sS -X POST "${BASE_URL}/v1/chat/completions" \
   -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -239,7 +258,7 @@ Expected response: HTTP 200 with OpenAI-compatible JSON completion.
 #### Verify Streaming Request Rejection (`stream: true`)
 Streaming is deferred to post-MVP. Verify that requests with `stream: true` are rejected with HTTP 400 Bad Request:
 ```bash
-curl -i -s -X POST "http://127.0.0.1:8787/v1/chat/completions" \
+curl -i -s -X POST "${BASE_URL}/v1/chat/completions" \
   -H "Authorization: Bearer ${GATEWAY_TOKENS}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -264,7 +283,7 @@ Expected response: HTTP 400 Bad Request with:
 
 #### Verify Authentication Enforcement
 ```bash
-curl -i -X GET "http://127.0.0.1:8787/v1/models" \
+curl -i -X GET "${BASE_URL}/v1/models" \
   -H "Authorization: Bearer invalid-token"
 ```
 Verify that the server rejects the request with HTTP `401 Unauthorized`.
@@ -284,17 +303,18 @@ Every request emits a single structured JSON line upon completion. To safeguard 
 |---|---|---|
 | `timestamp` | string | ISO 8601 UTC timestamp of request completion. |
 | `requestId` | string | Correlation identifier from `x-request-id` header or generated UUID. |
-| `status` | number | HTTP response status code. |
+| `status` | number | Gateway HTTP response status code. |
+| `upstreamStatus` | number (optional) | Final attempted provider HTTP status. Omitted before dispatch or when that attempt received no HTTP response. |
 | `latencyMs` | number | Total request execution duration in milliseconds. |
 | `provider` | string (optional) | Upstream provider serving the request (`groq` or `gemini`). Omitted on pre-dispatch rejections. |
 | `model` | string (optional) | Concrete upstream model name. Omitted on pre-dispatch rejections. |
-| `fallbackReason` | string (optional) | Reason triggering fallback dispatch (`rate_limit_exceeded`, `service_unavailable`, `connection_timeout`, `network_error`). |
+| `fallbackReason` | string (optional) | Reason triggering fallback dispatch (`payload_too_large`, `rate_limit_exceeded`, `service_unavailable`, `origin_dns_error`, `connection_timeout`, `network_error`). |
 | `attempts` | number (optional) | Count of upstream dispatch attempts executed (`0`, `1`, or `2`). |
 
 **Privacy Controls and Credential Exclusion:**
 - Payloads, user prompts, system prompts, assistant completions, tool arguments, and tool results are never logged.
 - Client credentials (`Authorization`, `x-api-key`) and upstream secrets (`GROQ_API_KEY`, `GEMINI_API_KEY`) are strictly excluded.
-- Pre-dispatch rejections (such as HTTP 400, 401, 404, 405, 413) omit provider and model rather than fabricating placeholder values.
+- Pre-dispatch rejections (such as HTTP 400, 401, 404, 405, and inbound body-limit HTTP 413) omit provider and model rather than fabricating placeholder values.
 - Downstream clients receive the correlation identifier in the `x-request-id` HTTP response header for tracking.
 
 Example diagnostic log entry:
@@ -306,6 +326,8 @@ Example fallback log entry:
 ```json
 {"timestamp":"2026-10-29T21:44:57.285Z","requestId":"c3a10d92-2310-4f51-b856-02e48aa12d09","status":200,"latencyMs":328,"provider":"gemini","model":"gemini-2.5-flash-lite","fallbackReason":"rate_limit_exceeded","attempts":2}
 ```
+
+Final HTTP 429 and 503 responses preserve only `Retry-After` and the six standard request/token `x-ratelimit-{limit,remaining,reset}-{requests,tokens}` headers from the final attempt. Earlier attempt headers and arbitrary upstream headers are excluded.
 
 ### Quota Diagnostics
 The MVP has no shared quota counters or circuit-breaker state to inspect. Use upstream status codes, rate-limit headers when available, and provider dashboards as the source of truth.

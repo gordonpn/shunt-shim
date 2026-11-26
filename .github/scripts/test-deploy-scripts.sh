@@ -125,6 +125,13 @@ MOCK_OUT
     ;;
   verify-ingress)
     url="$2"
+    if [ "$url" = "https://shunt-shim.gordon-pn.com" ] && [ "${CUSTOM_DOMAIN_FAIL_COUNT:-0}" -gt 0 ]; then
+      custom_calls=$(grep -c '^verify-ingress https://shunt-shim\.gordon-pn\.com$' "$MOCK_LOG")
+      if [ "$custom_calls" -le "$CUSTOM_DOMAIN_FAIL_COUNT" ]; then
+        echo "Transient custom domain propagation failure ($custom_calls/$CUSTOM_DOMAIN_FAIL_COUNT)" >&2
+        exit 1
+      fi
+    fi
     if [ "${FAIL_VERIFY:-false}" = "true" ] || { [ "${FAIL_CUSTOM_DOMAIN:-false}" = "true" ] && [ "$url" = "https://shunt-shim.gordon-pn.com" ]; }; then
       if [ "${FAIL_POST_ROLLBACK:-false}" != "true" ] && grep -q "^rollback$" "$MOCK_LOG"; then
         echo "Post-rollback ingress check passed for $url"
@@ -317,6 +324,44 @@ if ! echo "$output" | grep -q "Error: Post-rollback ingress verification also fa
   exit 1
 fi
 
+# Transient custom-domain propagation failure recovers on retry without rollback.
+: > "$MOCK_LOG"
+set +e
+output=$(env -i PATH="$MOCK_BIN:$PATH" MOCK_LOG="$MOCK_LOG" \
+  CLOUDFLARE_API_TOKEN="dummy-token" CLOUDFLARE_ACCOUNT_ID="dummy-account" \
+  CUSTOM_DOMAIN_FAIL_COUNT=2 CUSTOM_DOMAIN_VERIFY_ATTEMPTS=3 CUSTOM_DOMAIN_VERIFY_DELAY_SECONDS=0 \
+  bash "$REPO_ROOT/.github/scripts/deploy-production.sh" 2>&1)
+status=$?
+set -e
+if [ "$status" -ne 0 ] || grep -q '^rollback$' "$MOCK_LOG"; then
+  echo "Expected transient custom domain failure to recover without rollback: $output" >&2
+  exit 1
+fi
+if [ "$(grep -c '^verify-ingress https://shunt-shim\.gordon-pn\.com$' "$MOCK_LOG")" -ne 3 ] ||
+   [ "$(grep -c '^verify-ingress https://shunt-shim\.subdomain\.workers\.dev$' "$MOCK_LOG")" -ne 1 ]; then
+  echo "Expected custom domain retried 3 times after single workers.dev pass: $(cat "$MOCK_LOG")" >&2
+  exit 1
+fi
+
+# Budget exhaustion stops custom-domain retries cleanly so rollback can proceed.
+: > "$MOCK_LOG"
+set +e
+output=$(env -i PATH="$MOCK_BIN:$PATH" MOCK_LOG="$MOCK_LOG" \
+  CLOUDFLARE_API_TOKEN="dummy-token" CLOUDFLARE_ACCOUNT_ID="dummy-account" \
+  FAIL_CUSTOM_DOMAIN=true CUSTOM_DOMAIN_VERIFY_ATTEMPTS=6 \
+  CUSTOM_DOMAIN_VERIFY_DELAY_SECONDS=0 CUSTOM_DOMAIN_VERIFY_BUDGET_SECONDS=0 \
+  bash "$REPO_ROOT/.github/scripts/deploy-production.sh" 2>&1)
+status=$?
+set -e
+if [ "$status" -eq 0 ] || ! grep -q '^rollback$' "$MOCK_LOG"; then
+  echo "Expected exhausted budget to stop retrying and trigger rollback: $output" >&2
+  exit 1
+fi
+if [ "$(grep -c '^verify-ingress https://shunt-shim\.gordon-pn\.com$' "$MOCK_LOG")" -ne 2 ]; then
+  echo "Expected 1 pre-rollback attempt + 1 post-rollback check when budget=0: $(cat "$MOCK_LOG")" >&2
+  exit 1
+fi
+
 # Custom-domain failure must fail the release even when workers.dev is healthy.
 for recovery in false true; do
   : > "$MOCK_LOG"
@@ -324,6 +369,7 @@ for recovery in false true; do
   output=$(env -i PATH="$MOCK_BIN:$PATH" MOCK_LOG="$MOCK_LOG" \
     CLOUDFLARE_API_TOKEN="dummy-token" CLOUDFLARE_ACCOUNT_ID="dummy-account" \
     FAIL_CUSTOM_DOMAIN=true FAIL_POST_ROLLBACK="$recovery" \
+    CUSTOM_DOMAIN_VERIFY_ATTEMPTS=2 CUSTOM_DOMAIN_VERIFY_DELAY_SECONDS=0 \
     bash "$REPO_ROOT/.github/scripts/deploy-production.sh" 2>&1)
   status=$?
   set -e
@@ -331,9 +377,9 @@ for recovery in false true; do
     echo "Expected unhealthy custom domain to fail deployment and roll back: $output" >&2
     exit 1
   fi
-  if [ "$(grep -c '^verify-ingress https://shunt-shim.gordon-pn.com$' "$MOCK_LOG")" -ne 2 ] ||
-     [ "$(grep -c '^verify-ingress https://shunt-shim.subdomain.workers.dev$' "$MOCK_LOG")" -ne 2 ]; then
-    echo "Expected both endpoints checked before and after rollback: $(cat "$MOCK_LOG")" >&2
+  if [ "$(grep -c '^verify-ingress https://shunt-shim\.gordon-pn\.com$' "$MOCK_LOG")" -ne 3 ] ||
+     [ "$(grep -c '^verify-ingress https://shunt-shim\.subdomain\.workers\.dev$' "$MOCK_LOG")" -ne 2 ]; then
+    echo "Expected bounded retries before rollback and one check per endpoint after rollback: $(cat "$MOCK_LOG")" >&2
     exit 1
   fi
   if [ "$recovery" = false ]; then

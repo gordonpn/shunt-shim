@@ -54,7 +54,7 @@ provision-secrets: check-secrets
 deploy:
     pnpm exec wrangler deploy
 
-# Synchronize only deployment and gateway credentials to GitHub repository secrets
+# Synchronize production GitHub environment policy and secrets
 sync-github-secrets:
     @bash .github/scripts/sync-secrets.sh
 
@@ -79,12 +79,16 @@ rollback deployment_id="":
     pnpm exec wrangler rollback {{ if deployment_id != "" { deployment_id } else { "" } }} -y
 
 # Verify ingress endpoints and conformance
-verify-ingress url:
-    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }}
+verify-ingress url *args:
+    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }} {{ args }}
 
 # Verify ingress endpoints with live end-to-end chat completion
 verify-ingress-live url:
     node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }} --live
+
+# Verify exact-limit body parsing without consuming provider quota
+verify-ingress-resource url:
+    node --experimental-strip-types scripts/verify-ingress.ts {{ quote(url) }} --resource
 
 # Inspect real-time edge runtime logs
 tail:
@@ -106,6 +110,10 @@ check-secrets:
         status=1; \
     fi; \
     exit $status
+
+# Validate secrets and optional settings using the runtime validator
+check-env:
+    @node --experimental-strip-types scripts/check-env.mjs
 
 # Verify secret check behavior against edge cases
 test-secrets:

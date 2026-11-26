@@ -49,6 +49,7 @@ export interface UpstreamDiagnosticMetadata {
   provider?: "groq" | "gemini";
   model?: string;
   attempts?: number;
+  upstreamStatus?: number;
   fallbackReason?: string | undefined;
 }
 
@@ -69,8 +70,40 @@ export type UpstreamCompletionResult =
       diagnostic: UpstreamDiagnosticMetadata;
     };
 
+const RETRY_HEADERS = [
+  "Retry-After",
+  "x-ratelimit-limit-requests",
+  "x-ratelimit-limit-tokens",
+  "x-ratelimit-remaining-requests",
+  "x-ratelimit-remaining-tokens",
+  "x-ratelimit-reset-requests",
+  "x-ratelimit-reset-tokens",
+] as const;
+
+function getRetryHeaders(response: Response): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const name of RETRY_HEADERS) {
+    const value = response.headers.get(name);
+    if (value !== null) headers[name] = value;
+  }
+  return headers;
+}
+
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
 const DEFAULT_TOTAL_DEADLINE_MS = 60000;
+
+// Upstream HTTP 413 indicates per-request/TPM size rejection on smaller free-tier providers (e.g., Groq),
+// while Cloudflare Workers resolves origin/DNS failures to HTTP 530 instead of rejecting fetch().
+const ELIGIBLE_PRIMARY_FAILURE_REASONS = new Map<number, string>([
+  [413, "payload_too_large"],
+  [429, "rate_limit_exceeded"],
+  [503, "service_unavailable"],
+  [530, "origin_dns_error"],
+]);
+
+function getPrimaryFailureReason(status: number): string | undefined {
+  return ELIGIBLE_PRIMARY_FAILURE_REASONS.get(status);
+}
 
 interface AttemptSignal {
   signal: AbortSignal;
@@ -537,6 +570,10 @@ export async function forwardChatCompletion(
       primaryAttempt.cleanup();
     }
 
+    const primaryStatus = primaryResponse
+      ? { upstreamStatus: primaryResponse.status }
+      : {};
+
     if (primaryResponse && !primaryResponse.ok) {
       await cancelErrorBody(primaryResponse, cleanupSignal);
     }
@@ -554,6 +591,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
         },
       };
     }
@@ -575,6 +613,7 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
+            ...primaryStatus,
           },
         };
       }
@@ -593,6 +632,7 @@ export async function forwardChatCompletion(
             provider: primary.name,
             model: primary.model,
             attempts: 1,
+            ...primaryStatus,
           },
         };
       }
@@ -604,18 +644,17 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
         },
       };
     }
 
-    if (primaryResponse) {
-      if (primaryResponse.status === 429) {
-        isPrimaryEligibleFailure = true;
-        fallbackReason = "rate_limit_exceeded";
-      } else if (primaryResponse.status === 503) {
-        isPrimaryEligibleFailure = true;
-        fallbackReason = "service_unavailable";
-      }
+    const primaryEligibility = primaryResponse
+      ? getPrimaryFailureReason(primaryResponse.status)
+      : undefined;
+    if (primaryEligibility !== undefined) {
+      isPrimaryEligibleFailure = true;
+      fallbackReason = primaryEligibility;
     }
 
     if (!isPrimaryEligibleFailure) {
@@ -631,6 +670,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
         },
       };
     }
@@ -650,6 +690,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
           fallbackReason,
         },
       };
@@ -668,6 +709,7 @@ export async function forwardChatCompletion(
           provider: primary.name,
           model: primary.model,
           attempts: 1,
+          ...primaryStatus,
           fallbackReason,
         },
       };
@@ -768,6 +810,7 @@ export async function forwardChatCompletion(
             model: fallback.model,
             attempts: 2,
             fallbackReason,
+            upstreamStatus: fallbackResponse.status,
           },
         };
       }
@@ -790,6 +833,7 @@ export async function forwardChatCompletion(
             provider: fallback.name,
             model: fallback.model,
             attempts: 2,
+            upstreamStatus: fallbackResponse.status,
             fallbackReason,
           },
         };
@@ -809,6 +853,7 @@ export async function forwardChatCompletion(
             provider: fallback.name,
             model: fallback.model,
             attempts: 2,
+            upstreamStatus: fallbackResponse.status,
             fallbackReason,
           },
         };
@@ -821,17 +866,13 @@ export async function forwardChatCompletion(
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
     }
 
     if (fallbackResponse.status === 429) {
-      const retryAfter = fallbackResponse.headers.get("Retry-After");
-      const headers: Record<string, string> = {};
-      if (retryAfter) {
-        headers["Retry-After"] = retryAfter;
-      }
       return {
         ok: false,
         status: 429,
@@ -840,11 +881,12 @@ export async function forwardChatCompletion(
           "invalid_request_error",
           "rate_limit_exceeded",
         ),
-        headers,
+        headers: getRetryHeaders(fallbackResponse),
         diagnostic: {
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
@@ -854,6 +896,7 @@ export async function forwardChatCompletion(
       return {
         ok: false,
         status: 503,
+        headers: getRetryHeaders(fallbackResponse),
         error: createErrorResponse(
           "All upstream providers are currently unavailable",
           "api_error",
@@ -863,6 +906,7 @@ export async function forwardChatCompletion(
           provider: fallback.name,
           model: fallback.model,
           attempts: 2,
+          upstreamStatus: fallbackResponse.status,
           fallbackReason,
         },
       };
@@ -880,6 +924,7 @@ export async function forwardChatCompletion(
         provider: fallback.name,
         model: fallback.model,
         attempts: 2,
+        upstreamStatus: fallbackResponse.status,
         fallbackReason,
       },
     };

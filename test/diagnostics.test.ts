@@ -104,6 +104,63 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
     );
   };
 
+  describe("Final upstream HTTP status (#72)", () => {
+    it.each([200, 400, 401, 403, 500])(
+      "captures primary HTTP %i",
+      async (status) => {
+        captureFetch(() =>
+          status === 200
+            ? Response.json(groqFixtures.textCompletion)
+            : new Response(SECRET_ERROR_LEAK, { status }),
+        );
+        await postChat();
+        expect(capturedRecords[0]?.upstreamStatus).toBe(status);
+        expect(JSON.parse(capturedLogs[0] ?? "{}").upstreamStatus).toBe(status);
+        expect(capturedLogs.join("")).not.toContain(SECRET_ERROR_LEAK);
+      },
+    );
+
+    it.each([200, 429, 503, 400, 500])(
+      "captures final fallback HTTP %i",
+      async (status) => {
+        captureFetch((url) =>
+          isGroqRequest(url)
+            ? new Response(null, { status: 429 })
+            : status === 200
+              ? Response.json(geminiFixtures.textCompletion)
+              : new Response(null, { status }),
+        );
+        await postChat();
+        expect(capturedRecords[0]?.upstreamStatus).toBe(status);
+      },
+    );
+
+    it("omits HTTP status when the final attempt has no response", async () => {
+      captureFetch((url) => {
+        if (isGroqRequest(url)) return new Response(null, { status: 429 });
+        throw new Error("network error");
+      });
+      await postChat();
+      expect(capturedRecords[0]).not.toHaveProperty("upstreamStatus");
+    });
+
+    it("omits HTTP status before dispatch", async () => {
+      captureFetch(() => {
+        throw new Error("No dispatch expected");
+      });
+      await postChat({}, mockEnv, "Bearer invalid");
+      await postChat({});
+      await app.request("/missing");
+      await postChat("x", mockEnv, `Bearer ${SECRET_GATEWAY_TOKEN}`, {
+        "content-length": "10485761",
+      });
+      expect(capturedRecords).toHaveLength(4);
+      for (const record of capturedRecords)
+        expect(record).not.toHaveProperty("upstreamStatus");
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Metadata Allowlist and Normal Diagnostic Emission", () => {
     it("emits structured metadata on primary success without fabricating fallback", async () => {
       captureFetch(async (url) => {
@@ -205,6 +262,52 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
       expect(record.model).toBe("gemini-2.5-flash-lite");
       expect(record.attempts).toBe(2);
       expect(record.fallbackReason).toBe("service_unavailable");
+    });
+
+    it("emits fallback reason on primary HTTP 413 and records Gemini on fallback success", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response(`Request too large ${SECRET_ERROR_LEAK}`, {
+            status: 413,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        return Response.json(geminiFixtures.textCompletion);
+      });
+
+      const res = await postChat();
+      expect(res.status).toBe(200);
+
+      expect(capturedRecords.length).toBe(1);
+      const record = requireDefined(capturedRecords[0]);
+      expect(record.status).toBe(200);
+      expect(record.provider).toBe("gemini");
+      expect(record.model).toBe("gemini-2.5-flash-lite");
+      expect(record.attempts).toBe(2);
+      expect(record.fallbackReason).toBe("payload_too_large");
+    });
+
+    it("emits fallback reason on primary HTTP 530 and records Gemini on fallback success", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response(`error code: 1016 ${SECRET_ERROR_LEAK}`, {
+            status: 530,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        return Response.json(geminiFixtures.textCompletion);
+      });
+
+      const res = await postChat();
+      expect(res.status).toBe(200);
+
+      expect(capturedRecords.length).toBe(1);
+      const record = requireDefined(capturedRecords[0]);
+      expect(record.status).toBe(200);
+      expect(record.provider).toBe("gemini");
+      expect(record.model).toBe("gemini-2.5-flash-lite");
+      expect(record.attempts).toBe(2);
+      expect(record.fallbackReason).toBe("origin_dns_error");
     });
 
     it("emits fallback reason on primary connect timeout", async () => {
@@ -588,6 +691,7 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
         "timestamp",
         "requestId",
         "status",
+        "upstreamStatus",
         "latencyMs",
         "provider",
         "model",
@@ -600,6 +704,67 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
         for (const key of Object.keys(parsed)) {
           expect(allowedKeys.has(key)).toBe(true);
         }
+      }
+    });
+
+    it("excludes secrets, prompts, and raw upstream errors across terminal fallback failure and malformed 200 bodies", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response(
+            `Groq failure ${SECRET_PROMPT_CONTENT} ${SECRET_GROQ_KEY} ${SECRET_ERROR_LEAK}`,
+            { status: 503 },
+          );
+        }
+        return new Response(
+          `not-json ${SECRET_COMPLETION_OUTPUT} ${SECRET_GEMINI_KEY} ${SECRET_TOOL_ARGUMENT}`,
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      });
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: SECRET_PROMPT_CONTENT }],
+      });
+
+      expect(res.status).toBe(502);
+      const responseText = await res.text();
+      expect(capturedRecords).toHaveLength(1);
+      expect(capturedRecords[0]).toMatchObject({
+        status: 502,
+        upstreamStatus: 200,
+        provider: "gemini",
+        attempts: 2,
+        fallbackReason: "service_unavailable",
+      });
+
+      const combinedOutput = `${capturedLogs.join("\n")}\n${responseText}`;
+      for (const secret of [
+        SECRET_PROMPT_CONTENT,
+        SECRET_COMPLETION_OUTPUT,
+        SECRET_GATEWAY_TOKEN,
+        SECRET_GROQ_KEY,
+        SECRET_GEMINI_KEY,
+        SECRET_TOOL_ARGUMENT,
+        SECRET_ERROR_LEAK,
+      ]) {
+        expect(combinedOutput).not.toContain(secret);
+      }
+
+      const allowedKeys = new Set([
+        "timestamp",
+        "requestId",
+        "status",
+        "upstreamStatus",
+        "latencyMs",
+        "provider",
+        "model",
+        "fallbackReason",
+        "attempts",
+      ]);
+      for (const key of Object.keys(
+        JSON.parse(requireDefined(capturedLogs[0])) as Record<string, unknown>,
+      )) {
+        expect(allowedKeys.has(key)).toBe(true);
       }
     });
 

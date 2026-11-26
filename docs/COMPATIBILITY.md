@@ -40,10 +40,11 @@ this does not claim constant-time execution for the entire request.
   with identical auth, validation, routing, errors, and non-streaming JSON behavior.
 - `GET /v1/models` returns exactly `fast`. Model names are configured opaque
   aliases, not an OpenAI model-name allowlist or arbitrary provider bypass.
-- Accept `Authorization: Bearer <token>` or `x-api-key: <token>` against one
-  independently generated gateway secret. Neither header: 401. Malformed or
-  invalid supplied credentials: 401. If both are supplied, both must match the
-  configured secret; reject conflicting credentials. Never forward either.
+- Accept `Authorization: Bearer <token>` or `x-api-key: <token>` against any
+  comma-separated secret configured in `GATEWAY_TOKENS`. Neither header: 401.
+  Malformed or invalid supplied credentials: 401. If both are supplied, both
+  must match each other and match a configured secret; reject conflicting
+  credentials. Never forward either.
 - Require a JSON object, nonempty model string, and nonempty messages array.
   Support text `system`, `user`, `assistant`, and `tool` roles. Assistant content
   can be null or omitted when tool calls are present; other text content is a
@@ -103,12 +104,22 @@ Validation checks run in the following strict sequential pipeline before upstrea
 6. **Context & Token Bounds**: Combined token budgets exceeding 128,000 return HTTP 400 Bad Request (`context_length_exceeded`).
 7. **Streaming Parameter Rejection**: Validated requests specifying `stream: true` or `stream_options` return HTTP 400 Bad Request (`unsupported_parameter`) prior to upstream dispatch.
 
+### Browser access
+
+The three API paths support unauthenticated `OPTIONS` preflights (HTTP 204),
+with `Allow: GET, OPTIONS` for models and `Allow: POST, OPTIONS` for completions.
+CORS permits any origin with explicit Authorization or x-api-key headers;
+cookie credentials are not enabled. Actual requests still require gateway authentication.
+CORS headers also accompany API errors. Browser clients may read `x-request-id`
+and `Retry-After`. HEAD follows GET semantics for models and returns 405 for completions.
+Unknown paths remain 404, including OPTIONS requests.
+
 ### Unsupported methods and endpoints
 
 | Endpoint Path | HTTP Method | Gateway Status | Error Code | Response Details |
 | :--- | :--- | :--- | :--- | :--- |
-| `/v1/chat/completions`, `/chat/completions` | GET, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Evaluated at step 2. Header `Allow: POST`. Zero upstream invocation. |
-| `/v1/models` | POST, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Evaluated at step 2. Header `Allow: GET`. Zero upstream invocation. |
+| `/v1/chat/completions`, `/chat/completions` | GET, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Evaluated at step 2. Header `Allow: POST, OPTIONS`. Zero upstream invocation. |
+| `/v1/models` | POST, PUT, DELETE, PATCH | 405 Method Not Allowed | `invalid_request_error` | Evaluated at step 2. Header `Allow: GET, OPTIONS`. Zero upstream invocation. |
 | Any unrecognized route (e.g., `/v1/embeddings`, `/v1/responses`) | Any | 404 Not Found | `invalid_request_error` | Evaluated at step 1. Unsupported endpoint. Zero upstream invocation. |
 | Supported route | Supported method | 401 Unauthorized | `invalid_api_key` | Evaluated at step 3. Missing, malformed, or mismatching credentials. |
 | Supported route | Supported method | 413 Payload Too Large | `payload_too_large` | Evaluated at step 4. Body size > 10,485,760 bytes. Zero upstream invocation. |
@@ -157,21 +168,25 @@ The downstream commitment point is defined as the moment the gateway flushes HTT
 
 ### Mixed-failure mapping and observable outcomes
 
-When Attempt 1 (the configured primary provider, default: Groq) fails with an eligible error (HTTP 429, HTTP 503, connect failure / 5s connect or header timeout, or network fetch failure) before downstream response commitment, Attempt 2 (the configured fallback provider, default: Gemini) executes within the remaining time of the 60s total deadline.
+When Attempt 1 (the configured primary provider, default: Groq) fails with an eligible error (HTTP 413 payload/TPM limit exceeded, HTTP 429, HTTP 503, HTTP 530 Cloudflare Origin/DNS error, connect failure / 5s connect or header timeout, or network fetch failure) before downstream response commitment, Attempt 2 (the configured fallback provider, default: Gemini) executes within the remaining time of the 60s total deadline.
 
 The returned HTTP status code and OpenAI-compatible error object match the final failing attempt:
 
 | Primary Attempt (Default: Groq) | Fallback Attempt (Default: Gemini) | Gateway Status | Error Code | Observable Outcome / Behavior |
 | :--- | :--- | :--- | :--- | :--- |
+| 413 Payload Too Large | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 429 Too Many Requests | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | 503 Service Unavailable | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| 530 Origin / DNS Error | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | Connect / Header Timeout (5s) | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
 | Network Fetch Failure | 200 OK | 200 OK | (None) | Fallback succeeds; return Gemini completion. |
+| 413 Payload Too Large | 413 Payload Too Large | 502 | `bad_gateway` | Both providers rejected payload/TPM limit; return 502 error. |
 | 429 Too Many Requests | 429 Too Many Requests | 429 | `rate_limit_exceeded` | All providers rate-limited; preserve `Retry-After` from final attempt. |
 | 429 Too Many Requests | 503 Service Unavailable | 503 | `service_unavailable` | Final attempt unavailable; return 503 error. |
 | 503 Service Unavailable | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | 503 Service Unavailable | 503 Service Unavailable | 503 | `service_unavailable` | Both providers unavailable; return 503 error. |
-| Eligible failure (429/503/timeout/network) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
+| 530 Origin / DNS Error | 530 Origin / DNS Error | 502 | `bad_gateway` | Both providers failed origin resolution; return 502 error. |
+| Eligible failure (413/429/503/530/timeout/network) | Total Deadline (60s) | 504 | `gateway_timeout` | Total deadline expired before commitment; return 504 error. |
 | Connect / Header Timeout (5s) | 429 Too Many Requests | 429 | `rate_limit_exceeded` | Final attempt rate-limited; return 429 error. |
 | Connect / Header Timeout (5s) | Connect / Header Timeout (5s) | 504 | `gateway_timeout` | Both provider connection attempts timed out; return 504 error. |
 | Network Fetch Failure | Network Fetch Failure | 504 | `gateway_timeout` | Both provider network fetches failed; return 504 error. |
