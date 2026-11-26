@@ -188,7 +188,7 @@ pnpm exec wrangler tail
 
 ### `SearchDiagnosticMetadata` Schema
 
-Every completed `/v1/search` request emits a single structured JSON log line adhering to the `SearchDiagnosticMetadata` allowlist (Story `#160` / Task `#161`):
+The proposed requirement is for every completed `/v1/search` request to emit a single structured JSON log line adhering to the `SearchDiagnosticMetadata` allowlist (Story `#160` / Task `#161`):
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
@@ -203,18 +203,18 @@ Every completed `/v1/search` request emits a single structured JSON log line adh
 | `fallbackOccurred` | boolean | `true` if the primary provider failed and the router failed over to a secondary provider. |
 | `fallbackReason` | string (optional) | Low-cardinality reason for primary failure (`"rate_limit_exceeded"`, `"quota_exhausted"`, `"service_unavailable"`, `"connection_timeout"`, `"network_error"`). |
 
-### Privacy and Security Guarantees
+### Proposed Privacy and Security Requirements (Not Yet Verified)
 
-- **Zero Query or Content Logging:** Raw search strings (`query`), domain filters (`include_domains`, `exclude_domains`), returned result URLs, titles, and content snippets are never written to logs.
-- **Zero Credential Logging:** Inbound client tokens (`Authorization`, `x-api-key`) and upstream API keys (`TAVILY_API_KEY`, `EXA_API_KEY`, `BRAVE_API_KEY`, `PARALLEL_API_KEY`) are never logged.
+- **Zero Query or Content Logging:** Raw search strings (`query`), domain filters (`include_domains`, `exclude_domains`), returned result URLs, titles, and content snippets must never be written to logs.
+- **Zero Credential Logging:** Inbound client tokens (`Authorization`, `x-api-key`) and upstream API keys (`TAVILY_API_KEY`, `EXA_API_KEY`, `BRAVE_API_KEY`, `PARALLEL_API_KEY`) must never be logged.
 
-Example normal primary execution log:
+Synthetic normal primary execution log (not an observed event):
 
 ```json
 {"type":"search","timestamp":"2026-11-15T01:10:12.402Z","requestId":"9a8b7c6d-1234-4ef0-89ab-0123456789ab","status":200,"latencyMs":412,"provider":"tavily","searchDepth":"basic","resultCount":5,"fallbackOccurred":false}
 ```
 
-Example fallback execution log (Tavily HTTP 429 failing over to Exa):
+Synthetic fallback execution log (Tavily HTTP 429 failing over to Exa):
 
 ```json
 {"type":"search","timestamp":"2026-11-15T01:11:04.819Z","requestId":"3f4e5d6c-5678-4ab1-9cde-fedcba987654","status":200,"latencyMs":1185,"provider":"exa","searchDepth":"basic","resultCount":5,"fallbackOccurred":true,"fallbackReason":"rate_limit_exceeded"}
@@ -231,8 +231,8 @@ Example fallback execution log (Tavily HTTP 429 failing over to Exa):
 - Latency increases on requests that wait for a primary rejection before dispatching to the secondary provider.
 - If all configured free providers are exhausted or rate-limited simultaneously, clients receive HTTP `429 Too Many Requests` or HTTP `503 Service Unavailable` (`no_eligible_free_providers`).
 
-**Automated Gateway Behavior:**
-1. When the primary provider (default: Tavily) returns HTTP 429 or HTTP 402/432 (credit exhaustion), the in-worker ephemeral tracker (`src/search/quota/tracker.ts`) records the failure and places that provider into cooldown within the isolate (honoring upstream `Retry-After` headers or applying exponential backoff: 30s, 60s, 120s).
+**Target Automated Behavior (Tracker Integration Still Required):**
+1. The integrated adapter/router must record primary-provider HTTP 429 and HTTP 402 credit exhaustion in the in-worker tracker. The current tracker API supports 429 cooldown using valid `Retry-After` or 60s initially, then 60s/120s; `recordFailure` uses 30s/60s/120s. No production caller currently connects these methods to dispatch. Provider-specific HTTP 432 exhaustion normalization remains adapter work.
 2. The `SearchRouter` immediately dispatches the request to the next eligible free provider (default: Exa) within the 30-second total request deadline.
 3. Subsequent requests arriving at the same warm Worker isolate bypass the cooled-down primary provider and route directly to the secondary provider until the cooldown expires.
 
@@ -296,7 +296,7 @@ If an upstream provider is returning malformed payloads, authentication errors (
 | `403 Forbidden` | `provider_quarantined_for_billing_safety` | Client or routing configuration attempted to dispatch to a card-backed provider (`brave`, `parallel`) while `FREE_ONLY_POLICY=true` is enforced. | **Billing Safety Alert:** Confirm no unauthorized change attempted to route to paid tiers. Instruct client to use `"provider": "auto"`, `"tavily"`, or `"exa"`. Never disable `FREE_ONLY_POLICY` without Phase 2 budget caps. |
 | `413 Payload Too Large` | `payload_too_large` | Inbound `/v1/search` request body exceeded the 1 MB (1,048,576 bytes) limit. | Reduce request body size or domain filter list length on the calling client. |
 | `429 Too Many Requests` | `rate_limit_exceeded` | Primary and fallback providers both returned HTTP 429 rate-limit or credit-exhaustion responses. | Follow **Playbook A**: inspect `just tail` for `fallbackReason`, check Tavily and Exa dashboards for remaining credits, and rotate `PRIMARY_SEARCH_PROVIDER=exa` if only Tavily is exhausted. |
-| `502 Bad Gateway` | `upstream_error` | All attempted search providers returned upstream 5xx errors, invalid responses, or upstream authentication failures (such as a revoked upstream API key). | Check `just tail` for upstream status details. Verify `TAVILY_API_KEY` and `EXA_API_KEY` validity against provider dashboards. Re-provision secrets with `just provision-secrets` or disable the broken provider (Playbook B). |
+| `502 Bad Gateway` | `upstream_error` | All attempted search providers returned upstream 5xx errors or invalid responses. Upstream authentication failures are terminal in the current router and must not trigger fallback; confirm their final ingress mapping before release. | Check `just tail` for upstream status details. Verify `TAVILY_API_KEY` and `EXA_API_KEY` validity against provider dashboards. Re-provision secrets with `just provision-secrets` or disable the broken provider (Playbook B). |
 | `503 Service Unavailable` | `no_eligible_free_providers` | No free-tier search provider has valid credentials configured, all free providers are in rate-limit cooldown, or only card-backed keys are present under `FREE_ONLY_POLICY=true`. | **Quota / Config Escalation:** Run `pnpm exec wrangler secret list` to confirm `TAVILY_API_KEY` and `EXA_API_KEY` are bound. If both free tiers depleted their monthly credits, wait for quota reset or provision a valid free-tier key. |
 | `504 Gateway Timeout` | `gateway_timeout` | Upstream search attempts exceeded the 5s per-provider connection timeout and/or the 30s total search request deadline. | Inspect upstream status pages for Tavily and Exa latency incidents. Switch primary provider (`PRIMARY_SEARCH_PROVIDER=exa`) if the primary endpoint is hanging on connection establishment. |
 
@@ -317,7 +317,7 @@ If a recent Worker deployment introduces a regression in `/v1/search` routing, s
    ```
    Or target a specific deployment ID:
    ```bash
-   just rollback <deployment-id>
+   just rollback "<deployment-id>"
    ```
 
 3. Re-run the `/v1/search` smoke tests in Section 3 and the ingress verification suite (`just verify-ingress https://shunt-shim.<subdomain>.workers.dev`) to confirm service recovery.
@@ -335,6 +335,7 @@ What I verified against `origin/main` (commit `b5a3e96`) source:
 
 What is not verified or not yet true:
 
+- Provider registry/router building blocks do not register live provider adapters, connect tracker recording to dispatch, or attach search diagnostics to ingress. Existing `just provision-secrets` does not by itself prove that search keys are synchronized.
 - No `/v1/search` route exists on `main`, so every `curl` probe, the 401/400/413 behavior, and the `SearchDiagnosticMetadata` log line are untested end to end. Those codes are intended behavior, not observed behavior.
 - `invalid_json`, `invalid_parameter`, `invalid_api_key`, `payload_too_large`, and `upstream_error` for the search route are not checked against a search ingress handler because none exists.
 - Provider billing claims are unmerged research. Exa ($10 monthly balance) and Brave (prepaid, no subscription) follow the economics comparison in PR #178 (`docs/FREE_TIERS.md` section 7); Linkup stays ineligible per the terms audit in PR #208 (`docs/research/search-provider-terms.md`) and the quarantine in PR #189. Recheck these when those PRs merge.
@@ -342,4 +343,4 @@ What is not verified or not yet true:
 
 ## Next Action
 
-Keep this PR in draft until the search ingress route (#113) is merged, then run every Section 3 probe against `just dev` and a preview deployment, correct any status or error code that differs, and mark ready. Remaining runtime work is already tracked in #113, #130, #138, #161, and #162; no new issue is needed.
+This non-draft PR is ready for human review as a target operational specification. Operational acceptance remains blocked until search ingress (#113), provider adapters, diagnostics (#161), and search-secret provisioning (#162) are integrated. Then run every Section 3 probe against `just dev` and a preview deployment and correct any status or error code that differs. Documentation review or green CI does not establish live operational readiness. Remaining runtime work is already tracked in #113, #130, #138, #161, and #162; no new issue is needed.
