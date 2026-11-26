@@ -53,7 +53,7 @@ Relevance: automatic per-Preview Durable Object namespaces would address the Ver
 
 ### 3.1 Runtime Secrets (`GATEWAY_TOKENS`, `GROQ_API_KEY`, `GEMINI_API_KEY`, and Future Search Keys)
 
-- **Current MVP Secrets**: `shunt-shim` validates `GATEWAY_TOKENS`, `GROQ_API_KEY`, and `GEMINI_API_KEY` at request time (via `src/config.ts`).
+- **Current MVP Secrets**: `shunt-shim` validates `GATEWAY_TOKENS`, `GROQ_API_KEY`, and `GEMINI_API_KEY` at request time (via `validateEnvironment`).
 - **Future Phase 2 Search Provider Secrets**: Upcoming search and MCP capabilities will introduce provider API keys (such as Brave Search, Parallel, Tavily, Exa, and Serper).
 - **How Worker Previews Handle Secrets**:
   - `wrangler versions upload` uploads a new code bundle and configuration version, and inherits the target Worker's latest deployed secrets unless secret overrides are explicitly supplied.
