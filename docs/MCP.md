@@ -3,7 +3,9 @@
 > [!IMPORTANT]
 > **Target Specification Notice**: This document specifies the client integration contract for the Model Context Protocol (MCP) search server (`POST /mcp` Streamable HTTP and `GET /sse` Server-Sent Events transports exposing the `web_search` tool under Story #150, Tasks #151-#152, and Search Ingress Story #113). On `main`, the active runtime currently serves the Chat Completions MVP routes (`POST /v1/chat/completions`, `POST /chat/completions`, `GET /v1/models`, and `GET /health`). The `/mcp` and `/sse` routes documented below become active once the MCP server and search ingress tasks merge.
 
-This guide provides step-by-step instructions and copy-pasteable configuration templates for registering `shunt-shim` as a remote MCP search server in terminal AI coding assistants:
+These are preparatory configuration templates, not four-client acceptance evidence. In particular, the Antigravity header/interpolation behavior remains unverified; do not use it with a real token until tested.
+
+This guide provides step-by-step instructions and configuration templates for registering `shunt-shim` as a remote MCP search server in terminal AI coding assistants:
 
 1. **Antigravity CLI (`agy-cli`)** (`mcp_config.json`)
 2. **Claude Code** (`claude mcp add` CLI and `.mcp.json` / `~/.claude.json`)
@@ -75,9 +77,9 @@ Replace `https://shunt-shim.<your-subdomain>.workers.dev` with `http://127.0.0.1
 
 Claude Code supports remote HTTP and SSE MCP servers via the `claude mcp add` CLI or declarative JSON configuration in `~/.claude.json` (user scope) and `.mcp.json` (project scope).
 
-#### Option A: Register via CLI (user scope, recommended)
+#### Option A: Register via CLI (user scope, pending interpolation verification)
 
-Single-quote the `--header` argument so the shell passes the literal `${SHUNT_SHIM_TOKEN}` reference to Claude Code instead of expanding the secret in plaintext into `~/.claude.json` (Claude Code expands `${SHUNT_SHIM_TOKEN}` at runtime when exported in your shell):
+Single-quoting the `--header` argument passes a literal `${SHUNT_SHIM_TOKEN}` reference through the shell. Runtime expansion of that reference in CLI/user-scoped registrations has not been verified here. Prefer the documented project `.mcp.json` environment expansion in Option B until a client test confirms this path; shell quoting alone does not establish client interpolation:
 
 ```bash
 claude mcp add --transport http --scope user shunt-shim \
@@ -102,7 +104,7 @@ claude mcp get shunt-shim
 
 #### Option B: Declarative `.mcp.json` / `~/.claude.json`
 
-Claude Code expands `${VAR}` environment variable references inside `.mcp.json` and `~/.claude.json` so `.mcp.json` can be safely committed without secrets:
+The inspected documentation confirms `${VAR}` expansion in project `.mcp.json`. The example below targets that file; expansion in user-scoped `~/.claude.json` remains unverified:
 
 ```json
 {
@@ -131,7 +133,7 @@ OpenCode configures MCP servers in `~/.config/opencode/opencode.json` (global) o
     "shunt-shim": {
       "type": "remote",
       "url": "https://shunt-shim.<your-subdomain>.workers.dev/mcp",
-      "enabled": true,
+      "disabled": false,
       "headers": {
         "Authorization": "Bearer {env:SHUNT_SHIM_TOKEN}"
       }
@@ -140,23 +142,7 @@ OpenCode configures MCP servers in `~/.config/opencode/opencode.json` (global) o
 }
 ```
 
-#### Legacy / MCP-standard `mcpServers` block (`opencode.json`)
-
-For OpenCode versions or compatibility loaders that read the `mcpServers` object:
-
-```json
-{
-  "mcpServers": {
-    "shunt-shim": {
-      "type": "remote",
-      "url": "https://shunt-shim.<your-subdomain>.workers.dev/mcp",
-      "headers": {
-        "Authorization": "Bearer ${SHUNT_SHIM_TOKEN}"
-      }
-    }
-  }
-}
-```
+The current documented OpenCode schema uses `mcp`. No supported version or loader was verified for a legacy `mcpServers` block, so no legacy template is supplied.
 
 ### 3.4 OpenAI Codex CLI
 
@@ -185,7 +171,7 @@ env_http_headers = { "Authorization" = "SHUNT_SHIM_TOKEN_BEARER" }
 
 ## 4. `web_search` MCP Tool Contract
 
-The MCP server implements the Model Context Protocol `2024-11-05` specification and registers a single tool named `web_search` (defined in Story #150 / Task #151 and backed by the search validation bounds from Task #116).
+The proposed tool schema targets the Model Context Protocol `2024-11-05` tool contract. Transport-version negotiation must be finalized under #152, since Streamable HTTP was introduced after that version; this guide does not establish transport conformance. The planned server registers a single tool named `web_search` (defined in Story #150 / Task #151 and backed by the search validation bounds from Task #116).
 
 ### 4.1 Tool Definition (`tools/list`)
 
@@ -454,11 +440,13 @@ Checked on 2026-11-19 through Context7 (indexed official documentation and sourc
 | :--- | :--- | :--- |
 | Antigravity CLI (`agy-cli`), docs at antigravity.google/docs/settings and /docs/cli/gcli-migration | Global `~/.gemini/config/mcp_config.json` and workspace `.agents/mcp_config.json` paths; `serverUrl` is the current remote URL key | The `headers` field and `${SHUNT_SHIM_TOKEN}` interpolation (the documented example uses `env`); whether `/sse` URLs work under `serverUrl` (the migration page shows an `/sse` URL under `serverUrl`) |
 | Claude Code, docs at code.claude.com/docs/en/mcp (Context7 `/websites/code_claude`) | `claude mcp add --transport http <name> <url> --header "Authorization: Bearer ..."`; `${VAR}` expansion in `.mcp.json` `url` and `headers`; `type: "http"` | `${VAR}` expansion for values passed to `--header` or stored in `~/.claude.json`; the SSE transport is documented as deprecated, so prefer `/mcp` |
-| OpenCode, docs at opencode.ai/docs/mcp-servers and /docs/config (Context7 `/websites/opencode_ai`) | `type: "remote"`, `url`, `headers`, and `{env:VAR}` substitution (unset variables become an empty string) | `enabled: true` (the published schema lists `disabled`); the legacy `mcpServers` compatibility block and its `${VAR}` syntax (not found in the current OpenCode docs) |
+| OpenCode, docs at opencode.ai/docs/mcp-servers and /docs/config (Context7 `/websites/opencode_ai`) | `type: "remote"`, `url`, `headers`, and `{env:VAR}` substitution (unset variables become an empty string) | Installed-client behavior; legacy `mcpServers` and `${VAR}` syntax are not established by the current docs and have no template here |
 | OpenAI Codex CLI, source at openai/codex `codex-rs/config` (Context7 `/openai/codex`, latest indexed tag `rust-v0.165.0`) | `[mcp_servers.<name>]` with `url`, `bearer_token_env_var`, `env_http_headers` (value is the environment variable name), `startup_timeout_sec`, `tool_timeout_sec`, `enabled` | Behavior of the specific version a reader has installed |
 
 The `/mcp` and `/sse` smoke tests in section 5.2, and every client registration against this gateway, are unverifiable today: `main` has no MCP transport and no `/v1/search` ingress. The request and response envelopes shown are the intended contract.
 
 ## Next Action
+
+Before runtime acceptance, #152 must finalize protocol-version negotiation and the complete initialize/initialized lifecycle (including session or protocol headers required by the selected transport); the raw envelopes above are provisional examples.
 
 Once the MCP transport (#152) and search ingress (#113) land, run section 5.2 against `just dev` and a deployed Worker, register each of the four clients, and correct or delete every snippet in the Not verified column. That check is recorded as an acceptance item on #152; #154 stays open until it passes. No new issue is needed.
