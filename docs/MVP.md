@@ -227,17 +227,17 @@ Phase 1 restricts live search dispatch to providers that can operate under a str
 
 Before enabling either Phase 1 candidate in a deployed environment, the operator must verify all of the following account-level safeguards:
 
-1. **Zero saved payment method**: Confirm in the provider billing dashboard that no credit card, bank account, or backup payment method is attached to the account.
+1. **Zero saved payment method or paid balance**: Confirm in the provider billing dashboard that no credit card, bank account, or backup payment method is attached and no purchased credit balance is available. Free grants and promotional credits must be distinguished from purchased credits; a zero-card account can still spend prepaid funds.
 2. **Auto-recharge and pay-as-you-go disabled**: Confirm that automatic top-ups, overage billing, and pay-as-you-go toggles are explicitly disabled so exhaustion triggers an HTTP 402, HTTP 429, or HTTP 432 error instead of an invoice.
 3. **Confirmed recurring free grant**: Verify on the active account that the free credit grant resets on a recurring monthly schedule rather than operating as a one-time promotional balance.
 4. **Bounded per-request cost**: Restrict gateway adapter defaults to basic search execution (`basic` depth on Tavily; standard search without full-text crawl or research add-ons on Exa) so a single `/v1/search` call cannot consume multi-credit extraction charges.
 
 #### Fail-Closed Policy (`FREE_ONLY_POLICY=true`) and Quarantined Providers
 
-The gateway enforces `FREE_ONLY_POLICY=true` by default. Under this fail-closed policy, the router refuses to initialize or dispatch to any search provider that requires a payment instrument on file or lacks verified recurring free-tier hard stops:
+The search gateway must enforce `FREE_ONLY_POLICY=true` by default before live enablement. Under this fail-closed policy, the router must refuse to initialize or dispatch to any search provider that requires a payment instrument on file or lacks verified recurring free-tier hard stops:
 
 - **Quarantined card-backed providers**: Brave Search API ($5/month credit tier requiring a credit card on file; PR #178 reports a prepaid, no-subscription model, so overage exposure depends on the account's recharge settings) and Parallel Search API (paid per-request billing) are blocked from Phase 1 dispatch.
-- **Quarantined unverified or trial-only providers**: Linkup (renewal, card, and hard-stop policy are unverified per PR #178, and PR #208 recommends keeping it ineligible because of an API-wrapper restriction in its terms), Jina Search (`s.jina.ai`, non-recurring trial balance with paid reload), and Serper.dev (one-time signup credit pool without recurring monthly reset) are excluded from Phase 1 default routing.
+- **Quarantined unverified or trial-only providers**: Linkup (PR #178 documents a conditional monthly top-up and HTTP 429 exhaustion response, but account eligibility, card and auto-recharge policy remain unverified; PR #208 also identifies an API-wrapper restriction), Jina Search (`s.jina.ai`, non-recurring trial balance with paid reload), and Serper.dev (one-time signup credit pool without recurring monthly reset) are excluded from Phase 1 default routing.
 
 #### Search MVP Non-Goals
 
@@ -276,13 +276,13 @@ Card-backed search providers (such as Brave Search API and Parallel Search API) 
 
 ### Evidence and Limitations
 
-Provider facts in this section are unverified in this PR. Their sources are the economics comparison in [PR #178](https://github.com/gordonpn/shunt-shim/pull/178) (`docs/FREE_TIERS.md` section 7, verified there on November 12, 2026) and the terms audit in [PR #208](https://github.com/gordonpn/shunt-shim/pull/208) (`docs/research/search-provider-terms.md`, checked November 15, 2026). Neither has merged, so treat every claim below as unverified until they do.
+The provider economics and terms baseline depends on the comparison in [PR #178](https://github.com/gordonpn/shunt-shim/pull/178) (`docs/FREE_TIERS.md` section 7, verified there on November 12, 2026 with Linkup updated November 19) and the terms audit in [PR #208](https://github.com/gordonpn/shunt-shim/pull/208) (`docs/research/search-provider-terms.md`, checked November 15, 2026). Both remain merge prerequisites for this specification. Their publication does not verify account eligibility or runtime enforcement.
 
-- Exa ($10 monthly balance, HTTP 402 hard stop), Brave (card required, prepaid), Parallel (card required), and Linkup (unverified renewal) match PR #178.
-- Tavily's 1,000 monthly credits and no-card Researcher plan match PR #178. The HTTP 432 plan-limit status and the retryable-429 distinction are not stated in PR #178 and I could not verify them from it.
+- Exa ($10 monthly balance, HTTP 402 hard stop), Brave (card required, prepaid), Parallel (card required), and Linkup (conditional monthly top-up, eligibility and billing controls still unverified) match PR #178. Linkup's [pricing documentation](https://docs.linkup.so/pages/documentation/platform/pricing), rechecked November 26, 2026, states that eligible accounts are topped back up to $20 monthly and exhausted accounts return HTTP 429.
+- Tavily's 1,000 monthly credits and no-card Researcher plan match PR #178. Its official [Search API response documentation](https://docs.tavily.com/documentation/api-reference/endpoint/search), checked November 26, 2026, distinguishes HTTP 429 excessive-request rate limits from HTTP 432 plan usage limits. These are upstream statuses; gateway error mapping and bounded failover still require implementation tests.
 - These are published offers, not guarantees about a particular account, which is why the account verification checklist above is mandatory before live enablement.
 - No search code path enforces the milestone gates yet: `src/search` on `main` has the registry, quota policy, and router, but no `/v1/search` route.
 
 ### Next Action
 
-Merge PR #178 and PR #208 first, then recheck the claims above against them and cite the official Tavily error-code documentation for HTTP 432. Phase 2 and later work is already tracked in #134, #135, #136, #137, and #159, so no new issue is needed.
+Merge PR #178 and PR #208 first, then reconcile the approved economics and terms baseline with this specification. Complete the account checklist and verify the deployed search route, adapters, error mapping and fail-closed policy before live enablement (#113, #130, #197). Phase 2 and later work is already tracked in #134, #135, #136, #137, and #159, so no new issue is needed.
