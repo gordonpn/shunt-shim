@@ -160,10 +160,13 @@ preserving the ledger alone does not prevent unaccounted spend if an older
 gateway version still dispatches without coordinator reservations. Because
 `.github/scripts/deploy-production.sh` automatically runs `just rollback` on
 post-deploy ingress failure, require a quota-compatible rollback target or
-disable card-backed dispatch (`FREE_ONLY_POLICY=true` /
-`ALLOW_CARD_BACKED_PROVIDERS=false`) before restoring an older gateway version
-that lacks coordinator reservation enforcement. Roll back coordinator code only to
-a protocol/schema-compatible version; Cloudflare cannot roll back across a
+disable card-backed dispatch before restoring an older gateway version that lacks
+coordinator reservation enforcement. The planned controls (`FREE_ONLY_POLICY=true` /
+`ALLOW_CARD_BACKED_PROVIDERS=false`) are not implemented by the current Phase 1
+runtime. Before the first quota-enabled release, prove that the selected rollback
+target honors the chosen disable control and that it is active before automatic
+rollback can run; setting an unsupported variable is not a dispatch barrier.
+Roll back coordinator code only to a protocol/schema-compatible version; Cloudflare cannot roll back across a
 Durable Object lifecycle change [5]. Use a forward repair for such changes,
 keeping card-backed dispatch disabled until accounting is reliable. Existing
 automatic gateway rollback does not roll back the coordinator or its data.
