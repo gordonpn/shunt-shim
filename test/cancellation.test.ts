@@ -37,6 +37,35 @@ function isGroqRequest(rawUrl: string): boolean {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function awaitFixtureOperation<T>(
+  operation: Promise<T>,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} did not settle within 1000 ms`));
+        }, 1000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function createValidRequest(content = "hello") {
   return {
     model: "fast" as const,
@@ -45,6 +74,52 @@ function createValidRequest(content = "hello") {
     extensions: {},
   };
 }
+
+describe("Fixture operation bounds", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns the operation value and clears its timeout", async () => {
+    const pending = deferred<number>();
+    const operation = awaitFixtureOperation(pending.promise, "Test operation");
+
+    pending.resolve(42);
+
+    await expect(operation).resolves.toBe(42);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("preserves operation rejection and clears its timeout", async () => {
+    const pending = deferred<number>();
+    const failure = new Error("Operation failed");
+    const operation = awaitFixtureOperation(pending.promise, "Test operation");
+
+    pending.reject(failure);
+
+    await expect(operation).rejects.toBe(failure);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects a stalled operation at the fixture deadline and clears its timer", async () => {
+    const pending = deferred<number>();
+    const operation = awaitFixtureOperation(pending.promise, "Test operation");
+    const assertion = expect(operation).rejects.toThrow(
+      "Test operation did not settle within 1000 ms",
+    );
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await assertion;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / Story #32)", () => {
   let calls: CapturedCall[];
@@ -512,71 +587,121 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
   });
 
   describe("Concurrent Request Isolation", () => {
-    it("keeps concurrent requests isolated so cancellation of one does not abort another", async () => {
-      const controllerA = new AbortController();
-      const controllerB = new AbortController();
+    it.each(["request A", "request B"])(
+      "keeps cancellation isolated when %s reaches upstream first",
+      async (firstRequest) => {
+        const controllerA = new AbortController();
+        const controllerB = new AbortController();
+        const startedA = deferred<void>();
+        const startedB = deferred<void>();
+        const releaseA = deferred<Response>();
+        const releaseB = deferred<Response>();
 
-      captureFetch(async (url, init) => {
-        if (isGroqRequest(url)) {
-          if (init?.signal === controllerA.signal || calls.length === 1) {
-            controllerA.abort();
-            const sig = init?.signal;
-            if (!sig) {
-              const error = new Error("Aborted: signal not forwarded");
-              error.name = "AbortError";
-              throw error;
-            }
-            if (sig.aborted) {
+        captureFetch(async (url, init) => {
+          if (!isGroqRequest(url)) {
+            throw new Error("Cancellation must not trigger fallback");
+          }
+          const payload = JSON.parse(String(init?.body)) as {
+            messages: { content: string }[];
+          };
+          const content = payload.messages[0]?.content;
+          if (content === "request A") {
+            const signal = init?.signal;
+            if (!signal) throw new Error("Request A signal was not forwarded");
+            const abort = () => {
               const error = new Error("Aborted");
               error.name = "AbortError";
-              throw error;
+              releaseA.reject(error);
+            };
+            signal.addEventListener("abort", abort, { once: true });
+            startedA.resolve();
+            try {
+              if (signal.aborted) abort();
+              return await releaseA.promise;
+            } finally {
+              signal.removeEventListener("abort", abort);
             }
-            return new Promise<Response>((_, reject) => {
-              sig.addEventListener("abort", () => {
-                const error = new Error("Aborted");
-                error.name = "AbortError";
-                reject(error);
-              });
-            });
           }
-          const sig = init?.signal;
-          if (sig?.aborted) {
-            const error = new Error(
-              "Aborted: request B was unexpectedly aborted",
+          if (content === "request B") {
+            startedB.resolve();
+            return releaseB.promise;
+          }
+          throw new Error(`Unexpected request content: ${content}`);
+        });
+
+        const start = async (
+          content: string,
+          signal: AbortSignal,
+        ): Promise<Response> => {
+          const started = content === "request A" ? startedA : startedB;
+          try {
+            return await postChatWithSignal(
+              { model: "fast", messages: [{ role: "user", content }] },
+              signal,
             );
-            error.name = "AbortError";
-            throw error;
+          } finally {
+            started.reject(
+              new Error(`${content} completed before upstream start`),
+            );
           }
-          return Response.json(groqFixtures.textCompletion);
+        };
+        const pending: Promise<Response>[] = [];
+        try {
+          // Exercise both arrival orders without relying on asynchronous auth.
+          const aFirst = firstRequest === "request A";
+          const first = start(
+            firstRequest,
+            aFirst ? controllerA.signal : controllerB.signal,
+          );
+          pending.push(first);
+          await awaitFixtureOperation(
+            aFirst ? startedA.promise : startedB.promise,
+            `${firstRequest} upstream startup`,
+          );
+          const secondContent = aFirst ? "request B" : "request A";
+          const second = start(
+            secondContent,
+            aFirst ? controllerB.signal : controllerA.signal,
+          );
+          pending.push(second);
+          await awaitFixtureOperation(
+            aFirst ? startedB.promise : startedA.promise,
+            `${secondContent} upstream startup`,
+          );
+
+          controllerA.abort();
+          const resA = await (aFirst ? first : second);
+          expect([499, 504]).toContain(resA.status);
+          const callB = calls.find((call) => {
+            const messages = call.body?.messages as
+              | { content: string }[]
+              | undefined;
+            return messages?.[0]?.content === "request B";
+          });
+          expect(callB?.signal).toBeDefined();
+          expect(callB?.signal?.aborted).toBe(false);
+
+          releaseB.resolve(Response.json(groqFixtures.textCompletion));
+          const resB = await (aFirst ? second : first);
+          expect(resB.status).toBe(200);
+          const bodyB = (await resB.json()) as { object: string };
+          expect(bodyB.object).toBe("chat.completion");
+          expect(callB?.signal?.aborted).toBe(false);
+          expect(calls).toHaveLength(2);
+          expect(calls.every((call) => isGroqRequest(call.url))).toBe(true);
+        } finally {
+          controllerA.abort();
+          controllerB.abort();
+          releaseA.resolve(Response.json(groqFixtures.textCompletion));
+          releaseB.resolve(Response.json(groqFixtures.textCompletion));
+          // Authentication can stall before upstream receives an abortable signal.
+          await awaitFixtureOperation(
+            Promise.allSettled(pending),
+            "Cancelled request cleanup",
+          );
         }
-        return Response.json(geminiFixtures.textCompletion);
-      });
-
-      const promiseA = postChatWithSignal(
-        {
-          model: "fast",
-          messages: [{ role: "user", content: "request A" }],
-        },
-        controllerA.signal,
-      );
-
-      const promiseB = postChatWithSignal(
-        {
-          model: "fast",
-          messages: [{ role: "user", content: "request B" }],
-        },
-        controllerB.signal,
-      );
-
-      const [resA, resB] = await Promise.all([promiseA, promiseB]);
-
-      expect([499, 504]).toContain(resA.status);
-      expect(resB.status).toBe(200);
-      const bodyB = (await resB.json()) as { object: string };
-      expect(bodyB.object).toBe("chat.completion");
-      const callB = getCall(calls, 1);
-      expect(callB.signal?.aborted).toBe(false);
-    });
+      },
+    );
   });
 
   describe("Streaming Rejection Invariant", () => {
