@@ -277,9 +277,9 @@ feasibility, not economic benefit. PR #207 supplies the 50-case synthetic datase
 (`scripts/eval/decision-cases.jsonl`), while the live prototype, native REST
 path, three-way runs, and independent review remain open under #168.
 
-For a reproducible next evaluation, commit a fixed, reviewed JSONL dataset of
-at least 50 non-sensitive cases, ten each for intent, provider selection,
-relevance, recommendation fit and tool/escalation selection. Include clear
+For a reproducible next evaluation, independently review and freeze the existing
+JSONL dataset of at least 50 non-sensitive cases, ten each for intent, provider
+selection, relevance, recommendation fit and tool/escalation selection. Include clear
 positives/negatives, near-boundary cases, out-of-domain cases, adversarial
 instructions and intentionally missing context. Record rubric version, expected
 label and allowed abstention, annotator and rationale. Freeze labels before calls;
