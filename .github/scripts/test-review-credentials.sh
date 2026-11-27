@@ -22,25 +22,34 @@ REVIEW_GATEWAY_TOKEN='' DEEPSEEK_API_KEY=test bash "$script"
 REVIEW_GATEWAY_TOKEN=test DEEPSEEK_API_KEY=test bash "$script"
 jq -r -f "${script_dir}/test-review-eligible.jq" "${script_dir}/test-review-eligible.json" >"${tmp_dir}/cases"
 while IFS= read -r test_case; do
-  expected="$(jq -r '.[2]' <<<"$test_case")"
-  actual="$(jq '.[1]' <<<"$test_case" | jq -r --arg repository gordonpn/shunt-shim -f "${script_dir}/review-eligible.jq")"
+  expected="$(jq -r -f "${script_dir}/test-review-expected.jq" <<<"$test_case")"
+  actual="$(jq -f "${script_dir}/test-review-pr.jq" <<<"$test_case" | jq -r --arg repository gordonpn/shunt-shim -f "${script_dir}/review-eligible.jq")"
   if [[ "$actual" != "$expected" ]]; then
     echo "Eligibility case failed: $test_case" >&2
     exit 1
   fi
-  jq '.[1]' <<<"$test_case" >"${tmp_dir}/pr.json"
-  jq -f "${script_dir}/test-review-event.jq" <<<"$test_case" >"${tmp_dir}/event.json"
+  jq -f "${script_dir}/test-review-pr.jq" <<<"$test_case" >"${tmp_dir}/pr.json"
   for event_name in pull_request issue_comment; do
     : >"${tmp_dir}/output"
+    : >"${tmp_dir}/api-calls"
+    jq --arg event_name "$event_name" -f "${script_dir}/test-review-event.jq" <<<"$test_case" >"${tmp_dir}/event.json"
     PATH="${tmp_dir}:$PATH" REVIEW_TEST_PR_FILE="${tmp_dir}/pr.json" \
+      REVIEW_TEST_API_CALLS="${tmp_dir}/api-calls" \
       GITHUB_REPOSITORY=gordonpn/shunt-shim GITHUB_EVENT_NAME="$event_name" \
       GITHUB_EVENT_PATH="${tmp_dir}/event.json" GITHUB_OUTPUT="${tmp_dir}/output" \
       bash "${script_dir}/check-review-pr.sh"
     [[ "$(cat "${tmp_dir}/output")" == "eligible=$expected" ]]
+    if [[ "$event_name" == pull_request ]]; then
+      [[ ! -s "${tmp_dir}/api-calls" ]]
+    else
+      [[ "$(cat "${tmp_dir}/api-calls")" == 'api repos/gordonpn/shunt-shim/pulls/123' ]]
+    fi
   done
 done <"${tmp_dir}/cases"
 : >"${tmp_dir}/output"
+: >"${tmp_dir}/api-calls"
 if PATH="${tmp_dir}:$PATH" REVIEW_TEST_API_FAILURE=true \
+  REVIEW_TEST_API_CALLS="${tmp_dir}/api-calls" \
   GITHUB_REPOSITORY=gordonpn/shunt-shim GITHUB_EVENT_NAME=issue_comment \
   GITHUB_EVENT_PATH="${script_dir}/test-review-api-failure.json" GITHUB_OUTPUT="${tmp_dir}/output" \
   bash "${script_dir}/check-review-pr.sh" 2>"${tmp_dir}/stderr"; then
@@ -48,5 +57,6 @@ if PATH="${tmp_dir}:$PATH" REVIEW_TEST_API_FAILURE=true \
   exit 1
 fi
 grep -Fq 'Simulated GitHub API failure' "${tmp_dir}/stderr"
+[[ "$(cat "${tmp_dir}/api-calls")" == 'api repos/gordonpn/shunt-shim/pulls/123' ]]
 [[ ! -s "${tmp_dir}/output" ]]
 echo 'review credential checks passed'
