@@ -580,6 +580,24 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
             );
           }
         };
+        const awaitFixtureOperation = async <T>(
+          operation: Promise<T>,
+          label: string,
+        ): Promise<T> => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            return await Promise.race([
+              operation,
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => {
+                  reject(new Error(`${label} did not settle within 1000 ms`));
+                }, 1000);
+              }),
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
+        };
         const pending: Promise<Response>[] = [];
         try {
           // Exercise both arrival orders without relying on asynchronous auth.
@@ -589,13 +607,20 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
             aFirst ? controllerA.signal : controllerB.signal,
           );
           pending.push(first);
-          await (aFirst ? startedA.promise : startedB.promise);
+          await awaitFixtureOperation(
+            aFirst ? startedA.promise : startedB.promise,
+            `${firstRequest} upstream startup`,
+          );
+          const secondContent = aFirst ? "request B" : "request A";
           const second = start(
-            aFirst ? "request B" : "request A",
+            secondContent,
             aFirst ? controllerB.signal : controllerA.signal,
           );
           pending.push(second);
-          await Promise.all([startedA.promise, startedB.promise]);
+          await awaitFixtureOperation(
+            aFirst ? startedB.promise : startedA.promise,
+            `${secondContent} upstream startup`,
+          );
 
           controllerA.abort();
           const resA = await (aFirst ? first : second);
@@ -622,7 +647,11 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
           controllerB.abort();
           releaseA.resolve(Response.json(groqFixtures.textCompletion));
           releaseB.resolve(Response.json(groqFixtures.textCompletion));
-          await Promise.allSettled(pending);
+          // Authentication can stall before upstream receives an abortable signal.
+          await awaitFixtureOperation(
+            Promise.allSettled(pending),
+            "Cancelled request cleanup",
+          );
         }
       },
     );
