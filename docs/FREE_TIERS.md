@@ -122,7 +122,7 @@ Hardware environments with bare-metal compute (such as home servers or local dev
 
 ## 7. Web Search Provider Economics and MVP Selection
 
-Verified November 12, 2026 against the official pages linked below. This date applies only to this section; the preceding infrastructure and LLM catalog was not reverified. Prices are USD unless stated otherwise. These are published offers, not a guarantee about an operator's particular account. No accounts, cards, or paid plans were provisioned during verification.
+Verified November 12, 2026 against the official pages linked below, except where a row explicitly records a later check. This date applies only to this section; the preceding infrastructure and LLM catalog was not reverified. Prices are USD unless stated otherwise. These are published offers, not a guarantee about an operator's particular account. No accounts, cards, or paid plans were provisioned during verification.
 
 The search initiative (#98) requires a separate search API and a fail-closed `freeOnly` policy. Select **Tavily and Exa for the MVP**, using dedicated accounts with no payment method, paid credit balance, or automatic recharge. Treat a missing or unverified billing policy as ineligible. A public free allowance alone does not prove that a configured account will stop before spending money.
 
