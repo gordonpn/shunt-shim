@@ -44,12 +44,14 @@ Key constraints:
    Once HTTP 200 response headers and body bytes are flushed downstream to the client, the provider choice is locked. Once headers are committed to the network, status cannot be converted to an error or fallback response. Requests are never replayed on the fallback provider mid-flight.
 
 5. **Mixed Failure and Error Mapping**:
-   Fallback is permitted only prior to downstream response commitment on eligible errors (HTTP 429, HTTP 503, connect failure / 5s connect or header timeout within the 60s total deadline). When both attempts fail, the gateway returns the error class of the final failing attempt:
+   Fallback is permitted only prior to downstream response commitment on eligible errors (HTTP 413 provider payload/TPM limit exceeded, HTTP 429, HTTP 503, HTTP 530 Cloudflare Origin/DNS error, connect failure / 5s connect or header timeout within the 60s total deadline). When both attempts fail, the gateway returns the error class of the final failing attempt:
+   - Primary 413 and Fallback 413: HTTP 502.
    - Primary 429 and Fallback 429: HTTP 429 with preserved `Retry-After`.
    - Primary 429 and Fallback 503: HTTP 503.
    - Primary 503 and Fallback 429: HTTP 429.
    - Primary 503 and Fallback 503: HTTP 503.
-   - Primary eligible failure (429/503/timeout) and Fallback Timeout: HTTP 504.
+   - Primary 530 and Fallback 530: HTTP 502.
+   - Primary eligible failure (413/429/503/530/timeout) and Fallback Timeout: HTTP 504.
    - Primary connect timeout and Fallback 429: HTTP 429.
    - Primary connect timeout and Fallback connect timeout: HTTP 504.
    - Ineligible primary errors (400, 401, 403, 500): Terminate immediately with HTTP 502 without fallback attempt.

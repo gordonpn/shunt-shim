@@ -2,11 +2,9 @@ name: DeepSeek Review
 
 on:
   pull_request:
-    types: [ready_for_review]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+    types: [opened, ready_for_review]
+  issue_comment:
+    types: [created, edited]
 
 permissions:
   contents: read
@@ -17,7 +15,19 @@ jobs:
     name: runner / deepseek-review
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.sender.type != 'Bot' && github.actor != 'dependabot[bot]'
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+      cancel-in-progress: false
+    if: |
+      github.event.sender.type != 'Bot' &&
+      github.actor != 'dependabot[bot]' &&
+      ((github.event_name == 'pull_request' &&
+        !github.event.pull_request.draft &&
+        github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'issue_comment' &&
+         github.event.issue.pull_request &&
+         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+         contains(github.event.comment.body, '/review')))
     env:
       REVIEW_GATEWAY_TOKEN: ${{ secrets.REVIEW_GATEWAY_TOKEN }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -41,3 +51,4 @@ jobs:
           model: ${{ env.REVIEW_GATEWAY_TOKEN != '' && 'fast' || 'deepseek-v4-flash' }}
           chat-token: ${{ env.REVIEW_GATEWAY_TOKEN || secrets.DEEPSEEK_API_KEY }}
           sys-prompt: ${{ steps.load-prompt.outputs.prompt }}
+          watch-mention: '/review'

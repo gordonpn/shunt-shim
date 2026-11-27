@@ -124,11 +124,13 @@ If `stream_options` is supplied in the request body, the gateway returns HTTP 40
 
 Client applications must configure non-streaming completions (`stream: false` or omitted).
 
-## 6. Deferred Multi-Tenant Catalogs and Accounting
+## 6. Deferred Multi-Tenant Catalogs, Accounting, and Fallback Extensions
 
 `GATEWAY_TOKENS` accepts comma-separated static bearer secrets for independent client revocation and zero-downtime rotation without privilege tiers. Multi-tenant token catalogs (`sk-proj-*`), priority tiers, context-based model switching, and shared usage counters remain deferred beyond the MVP.
 
-No KV namespace or database is provisioned. Upstream HTTP status codes (HTTP 429, HTTP 503) and connection timeouts drive bounded fallback directly.
+Configurable multi-provider fallback ordering (`FALLBACK_ORDER`, generalizing the MVP `PRIMARY_PROVIDER` toggle) and an optional `DEEPSEEK_API_KEY` binding for last-resort paid credit fallback are also planned beyond the MVP. By policy, free-tier providers always remain ahead of DeepSeek so paid credits are consumed only if every configured free-tier upstream fails or exhausts quota.
+
+No KV namespace or database is provisioned. Upstream HTTP status codes (HTTP 413, HTTP 429, HTTP 503, HTTP 530) and connection timeouts drive bounded fallback directly.
 
 ## Validate before deployment
 

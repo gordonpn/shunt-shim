@@ -264,6 +264,52 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
       expect(record.fallbackReason).toBe("service_unavailable");
     });
 
+    it("emits fallback reason on primary HTTP 413 and records Gemini on fallback success", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response(`Request too large ${SECRET_ERROR_LEAK}`, {
+            status: 413,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        return Response.json(geminiFixtures.textCompletion);
+      });
+
+      const res = await postChat();
+      expect(res.status).toBe(200);
+
+      expect(capturedRecords.length).toBe(1);
+      const record = requireDefined(capturedRecords[0]);
+      expect(record.status).toBe(200);
+      expect(record.provider).toBe("gemini");
+      expect(record.model).toBe("gemini-2.5-flash-lite");
+      expect(record.attempts).toBe(2);
+      expect(record.fallbackReason).toBe("payload_too_large");
+    });
+
+    it("emits fallback reason on primary HTTP 530 and records Gemini on fallback success", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response(`error code: 1016 ${SECRET_ERROR_LEAK}`, {
+            status: 530,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        return Response.json(geminiFixtures.textCompletion);
+      });
+
+      const res = await postChat();
+      expect(res.status).toBe(200);
+
+      expect(capturedRecords.length).toBe(1);
+      const record = requireDefined(capturedRecords[0]);
+      expect(record.status).toBe(200);
+      expect(record.provider).toBe("gemini");
+      expect(record.model).toBe("gemini-2.5-flash-lite");
+      expect(record.attempts).toBe(2);
+      expect(record.fallbackReason).toBe("origin_dns_error");
+    });
+
     it("emits fallback reason on primary connect timeout", async () => {
       captureFetch(async (url) => {
         if (isGroqRequest(url)) {
@@ -658,6 +704,67 @@ describe("Private Diagnostics Specification (Task #37 / Story #36)", () => {
         for (const key of Object.keys(parsed)) {
           expect(allowedKeys.has(key)).toBe(true);
         }
+      }
+    });
+
+    it("excludes secrets, prompts, and raw upstream errors across terminal fallback failure and malformed 200 bodies", async () => {
+      captureFetch(async (url) => {
+        if (isGroqRequest(url)) {
+          return new Response(
+            `Groq failure ${SECRET_PROMPT_CONTENT} ${SECRET_GROQ_KEY} ${SECRET_ERROR_LEAK}`,
+            { status: 503 },
+          );
+        }
+        return new Response(
+          `not-json ${SECRET_COMPLETION_OUTPUT} ${SECRET_GEMINI_KEY} ${SECRET_TOOL_ARGUMENT}`,
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      });
+
+      const res = await postChat({
+        model: "fast",
+        messages: [{ role: "user", content: SECRET_PROMPT_CONTENT }],
+      });
+
+      expect(res.status).toBe(502);
+      const responseText = await res.text();
+      expect(capturedRecords).toHaveLength(1);
+      expect(capturedRecords[0]).toMatchObject({
+        status: 502,
+        upstreamStatus: 200,
+        provider: "gemini",
+        attempts: 2,
+        fallbackReason: "service_unavailable",
+      });
+
+      const combinedOutput = `${capturedLogs.join("\n")}\n${responseText}`;
+      for (const secret of [
+        SECRET_PROMPT_CONTENT,
+        SECRET_COMPLETION_OUTPUT,
+        SECRET_GATEWAY_TOKEN,
+        SECRET_GROQ_KEY,
+        SECRET_GEMINI_KEY,
+        SECRET_TOOL_ARGUMENT,
+        SECRET_ERROR_LEAK,
+      ]) {
+        expect(combinedOutput).not.toContain(secret);
+      }
+
+      const allowedKeys = new Set([
+        "timestamp",
+        "requestId",
+        "status",
+        "upstreamStatus",
+        "latencyMs",
+        "provider",
+        "model",
+        "fallbackReason",
+        "attempts",
+      ]);
+      for (const key of Object.keys(
+        JSON.parse(requireDefined(capturedLogs[0])) as Record<string, unknown>,
+      )) {
+        expect(allowedKeys.has(key)).toBe(true);
       }
     });
 

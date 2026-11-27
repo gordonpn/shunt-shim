@@ -4,6 +4,8 @@ fallback_models = ["deepseek/deepseek-v4-pro"]
 git_provider = "github"
 
 [pr_reviewer]
+# Avoid ticket_markdown_logic crashes when smaller models emit requirement lists instead of strings.
+require_ticket_analysis_review = false
 extra_instructions = """
 # Role
 Act as a skeptical architecture reviewer. Challenge whether this is the right solution, not merely whether it works.
@@ -49,6 +51,7 @@ Act as a skeptical architecture reviewer. Challenge whether this is the right so
 
 # Review Output Integration
 Map all architectural findings into the required PRReview schema instead of generating unformatted Markdown headings:
+- Emit exactly one fenced yaml code block containing a complete, non-empty `review:` mapping; never emit zero blocks, a leading skeleton block, or multiple yaml blocks.
 - Under 'Key issues to review', include:
   - Architectural Verdict: ARCHITECTURALLY SOUND / SOUND BUT OVERBUILT / RECONSIDER DESIGN / ARCHITECTURAL BLOCKER.
   - Underlying use case and evaluation of key assumptions (verified, unverified, weak, contradicted).
@@ -63,7 +66,7 @@ Map all architectural findings into the required PRReview schema instead of gene
 auto_review = true
 auto_describe = false
 auto_improve = false
-pr_actions = ["ready_for_review"]
+pr_actions = ["opened", "ready_for_review"]
 
 [ignore]
 glob = [

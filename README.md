@@ -17,7 +17,7 @@ Client -> Gateway (fast alias) -> Groq (Primary: qwen/qwen3.8-27b)
 - One virtual alias, `fast`, routing to primary Groq (`qwen/qwen3.8-27b`) and fallback Google AI Studio (`gemini-2.5-flash-lite`).
 - Non-streaming JSON responses, function tool calls, and tool-result message validation.
 - Deterministic HTTP 400 `unsupported_parameter` rejection when `stream: true` or `stream_options` are supplied (streaming is deferred to post-MVP).
-- At most one bounded fallback attempt on upstream HTTP 429, HTTP 503, connection timeout (5s), or network error before committing the response.
+- At most one bounded fallback attempt on upstream HTTP 413 (provider payload/TPM limit exceeded), HTTP 429, HTTP 503, HTTP 530 (Cloudflare Origin/DNS error), connection timeout (5s), or network error before committing the response.
 - One random gateway secret configured in `GATEWAY_TOKENS`, accepted via Bearer auth or `x-api-key`.
 - Strict request bounds: 10 MB body limit, 128,000 context ceiling, 8,192 max completion tokens, 5s connect timeout, 60s total deadline, and client disconnect cancellation.
 - Safe structured JSON diagnostics with request IDs, status, latency, provider, model, attempts, and fallback reasons; zero logging of prompts, completions, tool payloads, or credentials.
