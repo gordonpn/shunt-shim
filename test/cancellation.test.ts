@@ -47,6 +47,25 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+async function awaitFixtureOperation<T>(
+  operation: Promise<T>,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} did not settle within 1000 ms`));
+        }, 1000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function createValidRequest(content = "hello") {
   return {
     model: "fast" as const,
@@ -55,6 +74,52 @@ function createValidRequest(content = "hello") {
     extensions: {},
   };
 }
+
+describe("Fixture operation bounds", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns the operation value and clears its timeout", async () => {
+    const pending = deferred<number>();
+    const operation = awaitFixtureOperation(pending.promise, "Test operation");
+
+    pending.resolve(42);
+
+    await expect(operation).resolves.toBe(42);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("preserves operation rejection and clears its timeout", async () => {
+    const pending = deferred<number>();
+    const failure = new Error("Operation failed");
+    const operation = awaitFixtureOperation(pending.promise, "Test operation");
+
+    pending.reject(failure);
+
+    await expect(operation).rejects.toBe(failure);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects a stalled operation at the fixture deadline and clears its timer", async () => {
+    const pending = deferred<number>();
+    const operation = awaitFixtureOperation(pending.promise, "Test operation");
+    const assertion = expect(operation).rejects.toThrow(
+      "Test operation did not settle within 1000 ms",
+    );
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await assertion;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / Story #32)", () => {
   let calls: CapturedCall[];
@@ -578,24 +643,6 @@ describe("Cancellation, Deadlines, and Commitment Specification (Subtask #34 / S
             started.reject(
               new Error(`${content} completed before upstream start`),
             );
-          }
-        };
-        const awaitFixtureOperation = async <T>(
-          operation: Promise<T>,
-          label: string,
-        ): Promise<T> => {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          try {
-            return await Promise.race([
-              operation,
-              new Promise<never>((_, reject) => {
-                timer = setTimeout(() => {
-                  reject(new Error(`${label} did not settle within 1000 ms`));
-                }, 1000);
-              }),
-            ]);
-          } finally {
-            clearTimeout(timer);
           }
         };
         const pending: Promise<Response>[] = [];
