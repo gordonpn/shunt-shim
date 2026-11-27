@@ -2,6 +2,13 @@
 
 This document records non-obvious engineering and implementation decisions made in Shunt Shim, ordered newest first. Architectural or hard-to-reverse decisions are promoted to formal Architecture Decision Records under `docs/adr/` where adopted.
 
+## 2026-11-26: Proposed preview-compatible quota coordinator boundary
+
+- Decision: Keep the external coordinator Worker boundary in [ADR 0004](adr/0004-preview-compatible-quota-coordinator.md) proposed until its live preview, accounting, isolation, and rollback gates pass.
+- Rationale: A gateway that implements the Durable Object class loses Version URLs, while an external binding can preserve the existing preview verification flow subject to testing. The proposal records reconsideration triggers and the ADR index preserves its proposed status.
+- Rejected alternatives: Selecting isolated Previews or per-PR named Workers before their live acceptance gates pass.
+- Source: [Originating architecture task](https://github.com/gordonpn/shunt-shim/issues/204).
+
 ## 2026-11-10: Constant-time gateway token comparison via SHA-256 digests
 
 - Decision: Hash both compared values with SHA-256 and compare their equal-length 32-byte digests with Cloudflare Workers' native `crypto.subtle.timingSafeEqual` for both dual-header consistency checks and `GATEWAY_TOKENS` validation, supplying Node's `timingSafeEqual` only in unit-test setup.

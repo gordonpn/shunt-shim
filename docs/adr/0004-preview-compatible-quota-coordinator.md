@@ -196,6 +196,24 @@ This document records a proposed boundary only. [#134](https://github.com/gordon
 is accepted, the implementation lands, and live preview compatibility and production
 isolation are verified. No live deployments or quota acceptance tests are claimed here.
 
+## Reconsideration triggers
+
+- External Durable Object bindings prevent Version URLs or fail the ingress,
+  reservation, protocol-compatibility, or account-isolation gates above.
+- Live isolated Previews meet the same ingress, quota, isolation, rollback, and
+  cleanup gates with less release and operational overhead than a separate
+  coordinator Worker.
+- Measured coordinator requests, duration, storage operations, or retained state
+  exceed a documented Free allowance after accounting for production and previews
+  together. Revisit the boundary and retention policy before enabling traffic
+  that would exceed the allowance.
+- A required coordinator lifecycle change cannot preserve compatibility with
+  reachable gateway versions or the selected rollback target.
+
+Keep card-backed dispatch disabled while a failed acceptance gate or accounting
+boundary is unresolved. These triggers guide review of this proposal; they do not
+accept the design or authorize a paid plan.
+
 ## Sources
 
 Official Cloudflare documentation checked 2026-11-15 (sources 1-6) and 2026-11-19 (sources 7-8):
