@@ -2,6 +2,22 @@
 
 This document records non-obvious engineering and implementation decisions made in Shunt Shim, ordered newest first. Architectural or hard-to-reverse decisions are promoted to formal Architecture Decision Records under `docs/adr/` where adopted.
 
+## 2026-11-21 Reviewer dispatch and credential failures
+
+Eligible reviews require an open, non-draft, human-authored PR from this repository.
+Both reviewers run on head updates as well as creation and readiness. Comment runs
+fetch PR metadata before evaluating eligibility because comment payloads omit the
+head repository. Missing credentials fail an eligible review, making configuration
+failures visible. Gateway credentials retain precedence over direct DeepSeek.
+PR-Agent push settings live in the workflow environment because its repository
+settings loader reads the default branch during a PR review.
+
+Workflow-only filtering cannot establish comment PR origin. The GitHub API lookup
+provides that check. Provider call errors propagate through the pinned actions,
+so an additional inference preflight would consume quota without adding a verdict.
+
+Originating [issue](https://github.com/gordonpn/shunt-shim/issues/223).
+
 ## 2026-11-10: Constant-time gateway token comparison via SHA-256 digests
 
 - Decision: Hash both compared values with SHA-256 and compare their equal-length 32-byte digests with Cloudflare Workers' native `crypto.subtle.timingSafeEqual` for both dual-header consistency checks and `GATEWAY_TOKENS` validation, supplying Node's `timingSafeEqual` only in unit-test setup.

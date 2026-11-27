@@ -51,18 +51,27 @@ Neither coverage nor CodeQL currently validates gateway code.
 ## Review actions
 
 DeepSeek Review and PR-Agent run when a human opens a non-draft
-same-repository PR or marks a draft PR ready for review (draft PRs skip on open).
-Both prefer the `REVIEW_GATEWAY_TOKEN` repository secret to route
-reviews through `https://shunt-shim.gordon-pn.com/v1` with model alias `fast`.
-When `REVIEW_GATEWAY_TOKEN` is absent, both fall back to direct DeepSeek access
-using `DEEPSEEK_API_KEY`; when both secrets are absent, their review steps
-skip cleanly. Keep draft PRs as drafts while configuring automation.
-PR-Agent accepts created/edited comments on PRs from OWNER, MEMBER, or
-COLLABORATOR authors, excluding bots; DeepSeek Review accepts the same trusted
-PR comments when they mention `/review` (`watch-mention: '/review'`). Their
-issue-comment workflows become usable after merging to the default branch.
-Trusted commands may review fork PRs through the GitHub API; neither reviewer
-checks out or executes PR code with its secret.
+same-repository PR, marks a draft ready for review, or updates its head branch
+(`synchronize`). The PR-Agent workflow environment enables `handle_push_trigger`
+with `/review` in `push_commands`, including before repository settings are merged.
+Merge-only updates are reviewed as head updates; bot-triggered updates are excluded.
+Both prefer the `REVIEW_GATEWAY_TOKEN` repository secret to route reviews through
+`https://shunt-shim.gordon-pn.com/v1` with model alias `fast`. When that token is
+absent, both use `DEEPSEEK_API_KEY` against `https://api.deepseek.com`. Eligible
+reviews fail if both credentials are absent. Provider call failures propagate to
+the check, including unavailable endpoints and rejected credentials.
+
+PR-Agent accepts created/edited commands on PR comments from OWNER, MEMBER, or
+COLLABORATOR authors. DeepSeek Review accepts those comments when they contain
+`/review`. Bot senders and Dependabot actors are excluded. Both paths require an
+open, non-draft PR with a human author and a head repository matching this
+repository. Comment runs retrieve the PR through the GitHub API before checking
+credentials or executing either reviewer. Fork-origin and bot-authored PRs are
+excluded even when a trusted human requests review. API lookup failures fail the
+check. Comment dispatch changes take effect after merging to the default branch.
+PR-Agent uses separate PR-event and comment-event concurrency queues so a
+non-review comment cannot displace a pending head-update review.
+Explicit comment reviews can run alongside automatic reviews.
 
 In gateway mode, PR-Agent sets `CONFIG__MODEL=openai/fast`,
 `CONFIG__FALLBACK_MODELS=[]`, `CONFIG__MAX_MODEL_TOKENS=128000`,
