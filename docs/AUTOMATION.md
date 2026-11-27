@@ -69,6 +69,9 @@ repository. Comment runs retrieve the PR through the GitHub API before checking
 credentials or executing either reviewer. Fork-origin and bot-authored PRs are
 excluded even when a trusted human requests review. API lookup failures fail the
 check. Comment dispatch changes take effect after merging to the default branch.
+PR-Agent uses separate PR-event and comment-event concurrency queues so a
+non-review comment cannot displace a pending head-update review.
+Explicit comment reviews can run alongside automatic reviews.
 
 In gateway mode, PR-Agent sets `CONFIG__MODEL=openai/fast`,
 `CONFIG__FALLBACK_MODELS=[]`, `CONFIG__MAX_MODEL_TOKENS=128000`,
