@@ -87,7 +87,9 @@ claude mcp add --transport http --scope user shunt-shim \
   --header 'Authorization: Bearer ${SHUNT_SHIM_TOKEN}'
 ```
 
-To use the SSE transport instead:
+The legacy SSE transport is deprecated in the inspected Claude Code
+documentation. Gateway support and end-to-end client behavior remain unverified.
+Use this provisional example only when validating that legacy path.
 
 ```bash
 claude mcp add --transport sse --scope user shunt-shim \
